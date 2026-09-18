@@ -1,0 +1,1175 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (C) Arduino s.r.l. and/or its affiliated companies
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #121212;
+  --panel: #1c1c1c;
+  --ring: #2e2e2e;
+  --knob: #545b62;
+  --knob-active: #00b8be;
+  --text: #e6e6e6;
+  --text-dim: #8a8a8a;
+  --stop: #e63946;
+  --stop-active: #ff5a67;
+  --online: #3ddc84;
+  --warn: #e6b800;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  position: relative;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  user-select: none;
+  touch-action: pan-y; /* the joystick itself keeps touch-action: none */
+}
+
+header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  /* leave room on the right for the fixed IMU panel */
+  padding: 1rem 9.5rem 1rem 1.25rem;
+}
+
+header h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.status {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-dim);
+}
+
+.status--online {
+  color: var(--online);
+}
+
+.status--offline {
+  color: var(--stop);
+}
+
+.action-badge {
+  align-self: center;
+  margin-top: 0.25rem;
+  padding: 0.4rem 1.25rem;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.action-badge--active {
+  color: var(--knob-active);
+  border-color: var(--knob-active);
+}
+
+main {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.75rem;
+  padding: 1rem;
+}
+
+.joystick-base {
+  position: relative;
+  width: min(70vw, 260px);
+  height: min(70vw, 260px);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--panel), #0c0c0c 70%);
+  border: 1px solid var(--ring);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.6);
+  touch-action: none;
+}
+
+.joystick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 38%;
+  height: 38%;
+  border-radius: 50%;
+  background: var(--knob);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  transition: background 0.15s ease;
+}
+
+.joystick-knob.active {
+  background: var(--knob-active);
+}
+
+.direction {
+  font-size: 0.95rem;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+}
+
+.speed-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: min(70vw, 260px);
+}
+
+.speed-control__label {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.speed-control__row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.speed-btn {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid var(--ring);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.speed-btn:active {
+  background: var(--ring);
+}
+
+.speed-slider {
+  flex: 1;
+  accent-color: var(--knob-active);
+  touch-action: manipulation;
+}
+
+.speed-control__value {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.motor-dashboard {
+  width: min(70vw, 260px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.motor-gauge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.motor-gauge__label {
+  width: 1rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.motor-gauge__track {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+  overflow: hidden;
+}
+
+.motor-gauge__track::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ring);
+}
+
+.motor-gauge__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  background: var(--knob-active);
+  transition: left 0.1s linear, width 0.1s linear;
+}
+
+.motor-gauge__fill--reverse {
+  background: var(--stop);
+}
+
+.motor-gauge__value {
+  width: 3.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.stop-btn {
+  width: min(70vw, 260px);
+  padding: 0.85rem;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  border: none;
+  border-radius: 10px;
+  background: var(--stop);
+  color: #101010;
+  cursor: pointer;
+}
+
+.stop-btn:active {
+  background: var(--stop-active);
+}
+
+.imu-panel {
+  position: fixed;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 10;
+  width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.imu-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.imu-panel__temp {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.imu-panel__body {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tilt-indicator {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #232323, #0c0c0c 70%);
+  border: 1px solid var(--ring);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.6);
+}
+
+.tilt-indicator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--ring);
+  transform: translate(-50%, -50%);
+}
+
+.tilt-indicator__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--knob-active);
+  box-shadow: 0 0 5px rgba(0, 184, 190, 0.7);
+  transform: translate(-50%, -50%);
+  transition: transform 0.1s linear;
+}
+
+.imu-grid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.imu-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem;
+}
+
+.imu-metric__label {
+  font-size: 0.6rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.imu-metric__value {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.imu-panel__calib {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--ring);
+}
+
+.calibrate-btn {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid var(--ring);
+  border-radius: 6px;
+  background: var(--ring);
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.calibrate-btn:active {
+  background: var(--knob-active);
+  color: #101010;
+}
+
+.calibrate-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.calibrate-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calibrate-status--idle,
+.calibrate-status--failed {
+  color: var(--stop);
+}
+
+.calibrate-status--calibrating {
+  color: var(--warn);
+}
+
+.calibrate-status--calibrated {
+  color: var(--online);
+}
+
+.calib-banner {
+  width: min(70vw, 260px);
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(230, 184, 0, 0.08);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  font-size: 0.75rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.calib-banner[hidden] {
+  display: none;
+}
+
+.joystick-base--locked {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+@media (max-width: 380px) {
+  .imu-panel {
+    width: 136px;
+    padding: 0.5rem;
+  }
+
+  .tilt-indicator {
+    display: none;
+  }
+}
+
+/* ===================================================================================
+ * Balancing: header button, control bar, tuning overlay
+ * =================================================================================== */
+
+.header-btn {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--ring);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.header-btn:active {
+  background: var(--knob-active);
+  color: #101010;
+}
+
+.balance-bar {
+  width: min(86vw, 320px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+}
+
+.balance-bar__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.balance-bar__pitch {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.balance-bar__hint {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.bal-state {
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bal-state--idle { color: var(--text-dim); }
+.bal-state--armed { color: var(--warn); }
+.bal-state--balancing { color: var(--online); }
+.bal-state--fault { color: var(--stop); }
+
+.arm-btn {
+  padding: 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border: none;
+  border-radius: 10px;
+  background: var(--knob-active);
+  color: #101010;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.arm-btn--stop {
+  background: var(--stop);
+}
+
+.arm-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- tuning overlay ---- */
+.tune {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.tune[hidden] {
+  display: none;
+}
+
+.tune__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--ring);
+}
+
+.tune__bar h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.tune__saved {
+  font-size: 0.72rem;
+  color: var(--online);
+}
+
+.tune__saved--dirty {
+  color: var(--warn);
+}
+
+.tune__scroll {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: 1rem 1rem 3rem;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.tune__live {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.live-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+  min-width: 0;
+}
+
+.live-metric span {
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.live-metric b {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-metric--bad {
+  color: var(--stop);
+}
+
+.scope {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 640 / 220;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+}
+
+.scope__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  margin: 0.4rem 0 0.9rem;
+  font-size: 0.68rem;
+}
+
+.lg::before {
+  content: '';
+  display: inline-block;
+  width: 0.7rem;
+  height: 3px;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.lg--pitch { color: #00b8be; }
+.lg--lean { color: #e6b800; }
+.lg--speed { color: #d66bd6; }
+
+.tune__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.tune-btn {
+  flex: 1;
+  padding: 0.7rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border: 1px solid var(--ring);
+  border-radius: 8px;
+  background: var(--ring);
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tune-btn:active {
+  background: var(--knob-active);
+  color: #101010;
+}
+
+.tune-btn--danger {
+  color: var(--stop);
+}
+
+.tune__note {
+  margin: 0.3rem 0 1rem;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.pgroup {
+  margin-bottom: 0.6rem;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+}
+
+.pgroup > summary {
+  padding: 0.7rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pgroup > summary::-webkit-details-marker {
+  display: none;
+}
+
+.prow {
+  padding: 0.55rem 0.9rem 0.7rem;
+  border-top: 1px solid var(--ring);
+}
+
+.prow__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.prow__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.prow__unit {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.prow__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.2rem;
+}
+
+.prow__controls input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--knob-active);
+  touch-action: pan-y;
+}
+
+.prow__controls input[type='number'] {
+  width: 5.5rem;
+  padding: 0.35rem 0.4rem;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  border: 1px solid var(--ring);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.prow__reset {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--ring);
+  border-radius: 6px;
+  background: var(--ring);
+  color: var(--text-dim);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.prow__help {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  z-index: 40;
+  transform: translateX(-50%);
+  max-width: min(90vw, 420px);
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--knob-active);
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+}
+
+.toast[hidden] {
+  display: none;
+}
+
+.toast--error {
+  border-color: var(--stop);
+  color: var(--stop-active);
+}
+
+@media (max-width: 480px) {
+  .tune__live {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Phones: the fixed top-right IMU panel would cover the header buttons and the balance bar,
+   so let it flow with the page instead. */
+@media (max-width: 560px) {
+  header {
+    padding-right: 1.25rem;
+  }
+
+  header h1 {
+    flex: 1;
+  }
+
+  .imu-panel {
+    position: static;
+    width: min(86vw, 320px);
+    margin: 0 auto 0.5rem;
+    box-shadow: none;
+  }
+
+  .imu-panel .tilt-indicator {
+    display: none;
+  }
+}
+
+/* ---- mode switch ---- */
+.mode-switch {
+  display: flex;
+  width: min(86vw, 320px);
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--ring);
+}
+
+.mode-switch__btn {
+  flex: 1;
+  padding: 0.55rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.mode-switch__btn--active {
+  background: var(--knob-active);
+  color: #101010;
+}
+
+.mode-hint {
+  width: min(86vw, 320px);
+  margin: -0.9rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.balance-bar[hidden] {
+  display: none;
+}
+
+
+/* ===================================================================================
+ * Single-page layout: everything fits the viewport, nothing scrolls.
+ * Landscape/desktop: three columns (mode + balance | joystick | IMU + speed + motors).
+ * Portrait: two rows of side-by-side zones above a joystick that takes the leftover height.
+ * (The Tune overlay is a separate full-screen sheet with its own scrolling.)
+ * =================================================================================== */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  display: block;
+  min-height: 0;
+  touch-action: none; /* nothing on the dashboard scrolls; the Tune sheet re-enables pan-y */
+}
+
+.app {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) clamp(140px, min(58vh, 34vw), 420px) minmax(150px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'head head head'
+    'left center right';
+  gap: 0.6rem 1rem;
+  padding: 0.5rem 0.9rem 0.7rem;
+}
+
+.app__header {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0;
+  width: auto;
+}
+
+.app__header h1 {
+  flex: 0 0 auto;
+}
+
+.app__header .action-badge {
+  margin: 0 auto 0 0.4rem;
+  align-self: center;
+  padding: 0.25rem 0.9rem;
+  font-size: 0.72rem;
+}
+
+.zone {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.zone--left {
+  grid-area: left;
+  align-items: stretch;
+  justify-content: flex-start; /* mode switch + Start button sit at the top-left */
+}
+
+.zone--center {
+  grid-area: center;
+  align-items: center;
+  justify-content: center;
+}
+
+.zone--right {
+  grid-area: right;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+/* Every panel fills its column instead of using fixed widths. */
+.zone .mode-switch,
+.zone .mode-hint,
+.zone .balance-bar,
+.zone .calib-banner,
+.zone .speed-control,
+.zone .motor-dashboard,
+.zone .stop-btn,
+.zone .imu-panel {
+  width: 100%;
+  margin: 0;
+}
+
+.zone .imu-panel {
+  position: static;
+  box-shadow: none;
+}
+
+.zone .stop-btn {
+  margin-top: auto; /* pin STOP to the bottom of the right column */
+  padding: 0.7rem;
+}
+
+.mode-hint {
+  text-align: left;
+}
+
+.joystick-wrap {
+  container-type: size;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.joystick-base {
+  width: min(100cqw, 100cqh, 320px);
+  height: min(100cqw, 100cqh, 320px);
+}
+
+.speed-control {
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.speed-control__label {
+  display: flex;
+  justify-content: space-between;
+}
+
+.motor-dashboard {
+  gap: 0.35rem;
+}
+
+/* Let the speed slider shrink instead of pushing the + button out of its column. */
+.speed-slider {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.speed-control__row {
+  min-width: 0;
+}
+
+.mode-switch__btn {
+  min-width: 0;
+  padding-inline: 0.3rem;
+  white-space: nowrap;
+}
+
+/* Portrait phones: two columns on top, the joystick takes whatever height is left. */
+@media (max-aspect-ratio: 5/4) {
+  .app {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      'head head'
+      'left right'
+      'center center';
+    gap: 0.5rem 0.6rem;
+    padding: 0.4rem 0.6rem 0.6rem;
+  }
+
+  .zone--right {
+    gap: 0.4rem;
+  }
+
+  /* Compact IMU: two-column readout, no tilt bubble (its numbers are shown anyway). */
+  .imu-panel__body .tilt-indicator {
+    display: none;
+  }
+
+  .imu-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.1rem 0.5rem;
+  }
+
+  .imu-metric:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .zone .stop-btn {
+    margin-top: 0;
+  }
+
+  .joystick-wrap {
+    width: 100%;
+  }
+
+  .mode-hint,
+  .balance-bar__hint {
+    display: none;
+  }
+
+}
+
+/* Short landscape screens (phones on their side): trim the chrome. */
+@media (max-height: 520px) and (min-aspect-ratio: 5/4) {
+  .app__header h1 {
+    font-size: 0.95rem;
+  }
+
+  .mode-hint,
+  .balance-bar__hint,
+  .imu-panel__body .tilt-indicator {
+    display: none;
+  }
+
+  .balance-bar,
+  .imu-panel {
+    padding: 0.45rem;
+  }
+
+  .zone {
+    gap: 0.4rem;
+  }
+
+  .zone .stop-btn {
+    padding: 0.5rem;
+  }
+
+  .imu-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.05rem 0.5rem;
+  }
+
+  .imu-metric:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .motor-dashboard {
+    gap: 0.2rem;
+  }
+}
+
+.mode-switch__btn {
+  font-size: clamp(0.6rem, 2.7vw, 0.8rem);
+  letter-spacing: 0;
+}
+
+/* Very short screens (e.g. 568x320 landscape): squeeze the remaining vertical slack. */
+@media (max-height: 340px) and (min-aspect-ratio: 5/4) {
+  .app {
+    gap: 0.3rem 0.7rem;
+    padding: 0.3rem 0.6rem 0.4rem;
+  }
+
+  .zone {
+    gap: 0.25rem;
+  }
+
+  .speed-btn {
+    width: 1.6rem;
+    height: 1.6rem;
+  }
+
+  .zone .stop-btn {
+    padding: 0.35rem;
+    font-size: 0.85rem;
+  }
+
+  .imu-panel__calib {
+    padding-top: 0.25rem;
+  }
+
+  .calibrate-btn {
+    padding: 0.2rem 0.45rem;
+  }
+}
+
+.mode-switch__btn {
+  white-space: normal;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}

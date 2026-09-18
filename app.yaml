@@ -1,0 +1,6 @@
+name: julia-X2
+description: Tele-operated self-balancing robot, driven over WiFi with a joystick interface.
+ports: []
+bricks:
+- arduino:web_ui: {}
+icon: 🤖

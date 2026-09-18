@@ -1,0 +1,176 @@
+<!--
+SPDX-FileCopyrightText: Copyright (C) Arduino s.r.l. and/or its affiliated companies
+
+SPDX-License-Identifier: MPL-2.0
+-->
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Julia X2 Remote</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app__header">
+        <h1>Julia X2</h1>
+        <span id="status" class="status status--offline">Connecting…</span>
+        <div id="action" class="action-badge">Idle</div>
+        <button id="tune-open" class="header-btn" type="button">Tune</button>
+      </header>
+
+      <!-- Left: control mode + balancing (top-left of the dashboard) -->
+      <section class="zone zone--left">
+        <div class="mode-switch" role="tablist" aria-label="Control mode">
+          <button id="mode-manual" class="mode-switch__btn mode-switch__btn--active" type="button" role="tab">Manual</button>
+          <button id="mode-balance" class="mode-switch__btn" type="button" role="tab">Self-balancing</button>
+        </div>
+        <p id="mode-hint" class="mode-hint">Direct wheel control. The robot does not balance — keep it on a stand or use it as a rover.</p>
+
+        <div id="calib-banner" class="calib-banner" hidden>
+          ⚠ Calibrate the IMU before balancing — keep the robot still
+        </div>
+
+        <div id="balance-bar" class="balance-bar" hidden>
+          <div class="balance-bar__row">
+            <span id="bal-state" class="bal-state bal-state--idle">Idle</span>
+            <span id="bal-pitch" class="balance-bar__pitch">0.0°</span>
+          </div>
+          <button id="arm-btn" class="arm-btn" type="button">Start balancing</button>
+          <span id="bal-hint" class="balance-bar__hint">Calibrate, then hold the robot upright and press Start.</span>
+        </div>
+      </section>
+
+      <!-- Centre: joystick -->
+      <section class="zone zone--center">
+        <div class="joystick-wrap">
+          <div id="joystick-base" class="joystick-base joystick-base--locked">
+            <div id="joystick-knob" class="joystick-knob"></div>
+          </div>
+        </div>
+        <div id="direction" class="direction">STOP</div>
+      </section>
+
+      <!-- Right: IMU, speed, motors, stop -->
+      <section class="zone zone--right">
+        <div id="imu-panel" class="imu-panel">
+          <div class="imu-panel__header">
+            <span>IMU</span>
+            <span id="imu-temp" class="imu-panel__temp">--.-°C</span>
+          </div>
+          <div class="imu-panel__body">
+            <div class="tilt-indicator">
+              <div id="tilt-dot" class="tilt-indicator__dot"></div>
+            </div>
+            <div class="imu-grid">
+              <div class="imu-metric">
+                <span class="imu-metric__label">Tilt X</span>
+                <span id="imu-angle-x" class="imu-metric__value">0.0°</span>
+              </div>
+              <div class="imu-metric">
+                <span class="imu-metric__label">Tilt Y</span>
+                <span id="imu-angle-y" class="imu-metric__value">0.0°</span>
+              </div>
+              <div class="imu-metric">
+                <span class="imu-metric__label">Gyro X</span>
+                <span id="imu-gyro-x" class="imu-metric__value">0.0°/s</span>
+              </div>
+              <div class="imu-metric">
+                <span class="imu-metric__label">Gyro Y</span>
+                <span id="imu-gyro-y" class="imu-metric__value">0.0°/s</span>
+              </div>
+              <div class="imu-metric">
+                <span class="imu-metric__label">Gyro Z</span>
+                <span id="imu-gyro-z" class="imu-metric__value">0.0°/s</span>
+              </div>
+              <div class="imu-metric">
+                <span class="imu-metric__label">Accel</span>
+                <span id="imu-accel" class="imu-metric__value">0.00/0.00/0.00 g</span>
+              </div>
+            </div>
+          </div>
+          <div class="imu-panel__calib">
+            <button id="calibrate-btn" class="calibrate-btn">Calibrate</button>
+            <span id="calibrate-status" class="calibrate-status calibrate-status--idle">Not calibrated</span>
+          </div>
+        </div>
+
+        <div class="speed-control">
+          <span class="speed-control__label">Max Speed <span id="speed-value" class="speed-control__value">100%</span></span>
+          <div class="speed-control__row">
+            <button id="speed-down" class="speed-btn" aria-label="Decrease max speed">−</button>
+            <input id="speed-slider" class="speed-slider" type="range" min="10" max="100" step="5" value="100" />
+            <button id="speed-up" class="speed-btn" aria-label="Increase max speed">+</button>
+          </div>
+        </div>
+
+        <div class="motor-dashboard">
+          <div class="motor-gauge">
+            <span class="motor-gauge__label">L</span>
+            <div class="motor-gauge__track">
+              <div id="left-fill" class="motor-gauge__fill"></div>
+            </div>
+            <span id="left-value" class="motor-gauge__value">0</span>
+          </div>
+          <div class="motor-gauge">
+            <span class="motor-gauge__label">R</span>
+            <div class="motor-gauge__track">
+              <div id="right-fill" class="motor-gauge__fill"></div>
+            </div>
+            <span id="right-value" class="motor-gauge__value">0</span>
+          </div>
+        </div>
+
+        <button id="stop-btn" class="stop-btn">STOP</button>
+      </section>
+    </div>
+
+    <section id="tune" class="tune" hidden aria-label="Balance tuning">
+      <div class="tune__bar">
+        <h2>Balance tuning</h2>
+        <span id="tune-saved" class="tune__saved">Saved ✓</span>
+        <button id="tune-close" class="header-btn" type="button">Close</button>
+      </div>
+
+      <div class="tune__scroll">
+        <div class="tune__live">
+          <div class="live-metric"><span>Pitch</span><b id="lv-pitch">0.0°</b></div>
+          <div class="live-metric"><span>Rate</span><b id="lv-rate">0°/s</b></div>
+          <div class="live-metric"><span>Lean cmd</span><b id="lv-lean">0.0°</b></div>
+          <div class="live-metric"><span>Speed</span><b id="lv-speed">0</b></div>
+          <div class="live-metric"><span>Loop</span><b id="lv-loop">0 µs</b></div>
+        </div>
+
+        <canvas id="scope" class="scope" width="640" height="220"></canvas>
+        <div class="scope__legend">
+          <span class="lg lg--pitch">Pitch (°)</span>
+          <span class="lg lg--lean">Lean cmd (°)</span>
+          <span class="lg lg--speed">Speed (÷1000 steps/s)</span>
+        </div>
+
+        <div class="tune__actions">
+          <button id="tune-calibrate" class="tune-btn" type="button">1 · Calibrate gyro</button>
+          <button id="tune-trim" class="tune-btn" type="button">2 · Set balance point</button>
+        </div>
+        <p class="tune__note">Hold the robot still for step 1. For step 2, hold it by hand exactly where it
+          would stand without falling (or feels weightless on the wheels), then press.</p>
+
+        <div id="param-groups"></div>
+
+        <div class="tune__actions">
+          <button id="tune-save" class="tune-btn" type="button">Save now</button>
+          <button id="tune-reset" class="tune-btn tune-btn--danger" type="button">Reset to defaults</button>
+        </div>
+        <p class="tune__note">Changes apply to the robot instantly and are saved automatically.</p>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="libs/socket.io.min.js"></script>
+    <script src="libs/arduino.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
