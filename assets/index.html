@@ -8,7 +8,8 @@ SPDX-License-Identifier: MPL-2.0
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
     <title>Julia X2 Remote</title>
     <link rel="stylesheet" href="style.css" />
   </head>
@@ -21,19 +22,17 @@ SPDX-License-Identifier: MPL-2.0
         <button id="tune-open" class="header-btn" type="button">Tune</button>
       </header>
 
-      <!-- Left: control mode + balancing (top-left of the dashboard) -->
+      <!-- Left: mode, balancing, IMU -->
       <section class="zone zone--left">
         <div class="mode-switch" role="tablist" aria-label="Control mode">
           <button id="mode-manual" class="mode-switch__btn mode-switch__btn--active" type="button" role="tab">Manual</button>
           <button id="mode-balance" class="mode-switch__btn" type="button" role="tab">Self-balancing</button>
         </div>
-        <p id="mode-hint" class="mode-hint">Direct wheel control. The robot does not balance — keep it on a stand or use it as a rover.</p>
+        <p id="mode-hint" class="mode-hint">Direct wheel control. The robot does not balance.</p>
 
-        <div id="calib-banner" class="calib-banner" hidden>
-          ⚠ Calibrate the IMU before balancing — keep the robot still
-        </div>
+        <div id="calib-banner" class="calib-banner" hidden>Calibrate the IMU before balancing and keep the robot still.</div>
 
-        <div id="balance-bar" class="balance-bar" hidden>
+        <div id="balance-bar" class="card balance-bar" hidden>
           <div class="balance-bar__row">
             <span id="bal-state" class="bal-state bal-state--idle">Idle</span>
             <span id="bal-pitch" class="balance-bar__pitch">0.0°</span>
@@ -41,9 +40,33 @@ SPDX-License-Identifier: MPL-2.0
           <button id="arm-btn" class="arm-btn" type="button">Start balancing</button>
           <span id="bal-hint" class="balance-bar__hint">Calibrate, then hold the robot upright and press Start.</span>
         </div>
+
+        <div id="imu-panel" class="card imu-panel">
+          <div class="card__title"><span>Orientation</span><span id="imu-temp" class="card__aside">--.-°C</span></div>
+          <div class="imu-panel__body">
+            <div class="tilt-indicator"><div id="tilt-dot" class="tilt-indicator__dot"></div></div>
+            <div class="imu-tilt">
+              <div class="imu-metric"><span class="imu-metric__label">Tilt X</span><span id="imu-angle-x" class="imu-metric__value">0.0°</span></div>
+              <div class="imu-metric"><span class="imu-metric__label">Tilt Y</span><span id="imu-angle-y" class="imu-metric__value">0.0°</span></div>
+            </div>
+          </div>
+          <details class="disclose">
+            <summary>Gyro &amp; accelerometer</summary>
+            <div class="imu-grid">
+              <div class="imu-metric"><span class="imu-metric__label">Gyro X</span><span id="imu-gyro-x" class="imu-metric__value">0.0°/s</span></div>
+              <div class="imu-metric"><span class="imu-metric__label">Gyro Y</span><span id="imu-gyro-y" class="imu-metric__value">0.0°/s</span></div>
+              <div class="imu-metric"><span class="imu-metric__label">Gyro Z</span><span id="imu-gyro-z" class="imu-metric__value">0.0°/s</span></div>
+              <div class="imu-metric"><span class="imu-metric__label">Accel</span><span id="imu-accel" class="imu-metric__value">0.00/0.00/0.00 g</span></div>
+            </div>
+          </details>
+          <div class="imu-panel__calib">
+            <span id="calibrate-status" class="calibrate-status calibrate-status--idle">Not calibrated</span>
+            <button id="calibrate-btn" class="calibrate-btn">Calibrate</button>
+          </div>
+        </div>
       </section>
 
-      <!-- Centre: joystick -->
+      <!-- Centre: joystick + stop -->
       <section class="zone zone--center">
         <div class="joystick-wrap">
           <div id="joystick-base" class="joystick-base joystick-base--locked">
@@ -51,79 +74,60 @@ SPDX-License-Identifier: MPL-2.0
           </div>
         </div>
         <div id="direction" class="direction">STOP</div>
+        <button id="stop-btn" class="stop-btn">Stop</button>
       </section>
 
-      <!-- Right: IMU, speed, motors, stop -->
+      <!-- Right: obstacle sensor, speed, motors -->
       <section class="zone zone--right">
-        <div id="imu-panel" class="imu-panel">
-          <div class="imu-panel__header">
-            <span>IMU</span>
-            <span id="imu-temp" class="imu-panel__temp">--.-°C</span>
+        <div id="tof-panel" class="card tof-panel">
+          <div class="card__title"><span>Obstacle sensor</span><span id="tof-status" class="tof-status tof-status--off">Waiting…</span></div>
+          <div class="tof-panel__reading">
+            <b id="tof-mm">--</b><span id="tof-unit">mm</span>
+            <span id="tof-factor" class="tof-panel__factor"></span>
           </div>
-          <div class="imu-panel__body">
-            <div class="tilt-indicator">
-              <div id="tilt-dot" class="tilt-indicator__dot"></div>
-            </div>
-            <div class="imu-grid">
-              <div class="imu-metric">
-                <span class="imu-metric__label">Tilt X</span>
-                <span id="imu-angle-x" class="imu-metric__value">0.0°</span>
-              </div>
-              <div class="imu-metric">
-                <span class="imu-metric__label">Tilt Y</span>
-                <span id="imu-angle-y" class="imu-metric__value">0.0°</span>
-              </div>
-              <div class="imu-metric">
-                <span class="imu-metric__label">Gyro X</span>
-                <span id="imu-gyro-x" class="imu-metric__value">0.0°/s</span>
-              </div>
-              <div class="imu-metric">
-                <span class="imu-metric__label">Gyro Y</span>
-                <span id="imu-gyro-y" class="imu-metric__value">0.0°/s</span>
-              </div>
-              <div class="imu-metric">
-                <span class="imu-metric__label">Gyro Z</span>
-                <span id="imu-gyro-z" class="imu-metric__value">0.0°/s</span>
-              </div>
-              <div class="imu-metric">
-                <span class="imu-metric__label">Accel</span>
-                <span id="imu-accel" class="imu-metric__value">0.00/0.00/0.00 g</span>
-              </div>
-            </div>
+          <div class="tof-bar" aria-hidden="true">
+            <div id="tof-slow" class="tof-bar__slow"></div>
+            <div id="tof-stop" class="tof-bar__stop"></div>
+            <div id="tof-marker" class="tof-bar__marker" hidden></div>
           </div>
-          <div class="imu-panel__calib">
-            <button id="calibrate-btn" class="calibrate-btn">Calibrate</button>
-            <span id="calibrate-status" class="calibrate-status calibrate-status--idle">Not calibrated</span>
+          <div class="tof-bar__scale"><span>0</span><span>600</span><span>1200 mm</span></div>
+          <label class="row row--switch">
+            <span>Avoid obstacles</span>
+            <input id="tof-enable" class="switch" type="checkbox" checked />
+          </label>
+          <div class="row row--slider">
+            <span class="row__label">Stop distance <b id="tof-thr-val">300</b> mm</span>
+            <input id="tof-thr" class="slider" type="range" min="100" max="800" step="10" value="300" />
           </div>
+          <details class="disclose">
+            <summary>Sensor limits</summary>
+            <p class="tof-note">Only forward motion is limited. Range 100–800 mm; the sensor is reliable from
+              30 to 1200 mm on light targets. Dark, glass or shiny objects and sunlight read shorter or fail.
+              Slows from 1.5× the stop distance.</p>
+          </details>
         </div>
 
-        <div class="speed-control">
-          <span class="speed-control__label">Max Speed <span id="speed-value" class="speed-control__value">100%</span></span>
+        <div class="card speed-control">
+          <span class="speed-control__label">Max speed <span id="speed-value" class="speed-control__value">100%</span></span>
           <div class="speed-control__row">
             <button id="speed-down" class="speed-btn" aria-label="Decrease max speed">−</button>
-            <input id="speed-slider" class="speed-slider" type="range" min="10" max="100" step="5" value="100" />
+            <input id="speed-slider" class="slider" type="range" min="10" max="100" step="5" value="100" />
             <button id="speed-up" class="speed-btn" aria-label="Increase max speed">+</button>
           </div>
         </div>
 
-        <div class="motor-dashboard">
+        <div class="card motor-dashboard">
           <div class="motor-gauge">
-            <span class="motor-gauge__label">L</span>
-            <div class="motor-gauge__track">
-              <div id="left-fill" class="motor-gauge__fill"></div>
-            </div>
+            <span class="motor-gauge__label">Left</span>
+            <div class="motor-gauge__track"><div id="left-fill" class="motor-gauge__fill"></div></div>
             <span id="left-value" class="motor-gauge__value">0</span>
           </div>
           <div class="motor-gauge">
-            <span class="motor-gauge__label">R</span>
-            <div class="motor-gauge__track">
-              <div id="right-fill" class="motor-gauge__fill"></div>
-            </div>
+            <span class="motor-gauge__label">Right</span>
+            <div class="motor-gauge__track"><div id="right-fill" class="motor-gauge__fill"></div></div>
             <span id="right-value" class="motor-gauge__value">0</span>
           </div>
         </div>
-
-        <button id="stop-btn" class="stop-btn">STOP</button>
       </section>
     </div>
 

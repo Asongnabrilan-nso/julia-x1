@@ -528,3 +528,23 @@ tools/sim/           host-side simulator
 | `MPU6050 NOT found` | Qwiic cable/connector, IMU power; the sketch expects `Wire1` |
 | Settings vanished | `data/tuning.json` missing/unreadable; the file is only written after a change |
 | Nothing works after editing the sketch | `arduino-app-cli app clean-cache user:julia-x2 --force` then restart |
+
+## Obstacle avoidance (VL53L0X ToF sensor)
+
+The sensor sits on `Wire2` (A4/A5), separate from the IMU on `Wire1`, and must face **forward**.
+Avoidance runs entirely on the MCU (works in manual and balance mode, survives a WiFi drop):
+
+- Forward speed is scaled 100% -> 0% between `1.5 x avoid_mm` and `avoid_mm`; at or below `avoid_mm` forward is 0.
+- Only forward motion is limited. Reverse and turning are never restricted, so you can always back away.
+- In balance mode the forward command is cut and the speed loop brakes the robot; it will roll a little
+  past a fast approach, so raise the stop distance when driving faster.
+- No sensor detected at boot -> avoidance is inactive (robot stays usable). Sensor working, then silent for
+  >400 ms (or I2C timeouts) -> forward is blocked (fail safe).
+- "No target in range" (>1200 mm / 8190 reading) never blocks.
+- Readings are a 3-sample median at 20 Hz (33 ms timing budget).
+
+Operating limits (datasheet/guides): reliable 30-1200 mm indoors on light targets, +-3% typical, 25 deg
+field of view. Dark/matte, glass and shiny surfaces and direct sunlight reduce range or give false values.
+Dashboard threshold `avoid_mm` is limited to 100-800 mm: 100 mm is the least the robot can stop in, and
+800 mm keeps the slow-down band (1.5x) inside the 1200 mm reliable range. Very thin/narrow obstacles or
+ones off the sensor axis (25 deg cone, forward lean while balancing) may be missed.

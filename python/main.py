@@ -5,6 +5,7 @@
 import json
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 from arduino.app_utils import App, Bridge, Logger
@@ -26,7 +27,12 @@ SAVE_DEBOUNCE_S = 1.5
 # MCU state / fault codes (must match enum State / Fault in sketch.ino)
 ST_IDLE, ST_ARMED, ST_BALANCING, ST_FAULT = 0, 1, 2, 3
 MODE_MANUAL, MODE_BALANCE = 0, 1  # control modes (must match enum Mode in sketch.ino)
-FAULT_TEXT = {0: "", 1: "Fell over (tilt beyond fall limit)", 2: "Wheel speed runaway", 3: "IMU read failure"}
+FAULT_TEXT = {
+    0: "",
+    1: "Fell over (tilt beyond fall limit)",
+    2: "Wheel speed runaway (check balance point, pitch sign and motor directions)",
+    3: "IMU read failure",
+}
 
 # Tunable parameters. Names/limits must match PARAM_TABLE in sketch.ino and defaults must match
 # jb::Params in sketch/balance.h. `group` and `help` only drive the tuning panel.
@@ -72,6 +78,14 @@ PARAMS = [
      "Set to 1 if the left wheel drives backward when it should go forward."),
     ("invert_right", "Mounting", "Invert right motor", "0/1", 0.0, 0.0, 1.0, 1.0,
      "Set to 1 if the right wheel drives backward when it should go forward."),
+    # VL53L0X limits: reliable 30-1200 mm; forward speed ramps down over thr..1.5*thr, so 800 mm is the
+    # highest threshold whose slow-down band still lies inside the sensor's reliable range, and 100 mm
+    # is the lowest at which the robot can still stop (30 mm is the sensor's own floor).
+    ("avoid_en", "Obstacle avoidance", "Avoidance enabled", "0/1", 1.0, 0.0, 1.0, 1.0,
+     "Slow and stop FORWARD motion when the ToF sensor sees an obstacle. Reverse and turning stay free."),
+    ("avoid_mm", "Obstacle avoidance", "Stop distance", "mm", 300.0, 100.0, 800.0, 10.0,
+     "Forward motion stops at this distance and ramps down from 1.5x this. Raise it for a faster or "
+     "balancing robot (it needs room to brake). Sensor range: 30-1200 mm on light targets."),
 ]
 PARAM_META = {p[0]: p for p in PARAMS}
 PARAM_DEFAULTS = {p[0]: p[4] for p in PARAMS}
@@ -113,7 +127,11 @@ _bal = {
     "loop_us": 0,     # worst-case control-cycle duration since arming, us (budget: 5000)
     "overruns": 0,    # control cycles that missed the 5 ms deadline since arming
 }
+# Latest VL53L0X reading (Bridge.notify("tof", ...)). The avoidance itself runs on the MCU.
+TOF_STATUS_TEXT = {0: "not detected", 1: "ok", 2: "no target in range", 3: "no response"}
+_tof = {"mm": -1, "status": 0, "factor": 100}  # mm -1 = nothing in range; factor = forward speed %
 _bal_lock = threading.Lock()
+_bal_history = deque(maxlen=120)  # last ~6 s of balance frames, dumped to the log on a fault
 _mcu_pver = None  # MCU's count of set_param calls since boot; a decrease means the MCU rebooted
 
 # Live parameter values (what the MCU is running). Persisted overrides live in TUNING_FILE.
@@ -449,6 +467,12 @@ def on_balance_arm(sid, data):
     if want and _calibration_status != "calibrated":
         _notice("Calibrate the IMU first.", "error", sid=sid)
         return
+    if want and _params["trim"] == 0.0:
+        # A measured balance point is never exactly 0.00: this means "Set balance point" was skipped,
+        # and engaging with it wrong makes the wheels chase the error until they hit the speed limit.
+        _notice("Set the balance point first (hold the robot upright, press 'Set balance point'). "
+                "Also verify motor directions and pitch sign (docs/BALANCING.md 5.3-5.5).", "error", sid=sid)
+        return
 
     def _run():
         try:
@@ -468,6 +492,7 @@ def on_connect(sid):
     _set_speed_scale(_speed_scale, sid=sid)
     ui.send_message("imu", _imu, room=sid)
     ui.send_message("balance", _balance_payload(), room=sid)
+    ui.send_message("tof", _tof_payload(), room=sid)
     ui.send_message("calibration_status", {"status": _calibration_status}, room=sid)
     _broadcast_params(sid)
 
@@ -489,6 +514,7 @@ def on_balance(state, fault, pitch, rate, lean, speed, accel, loop_us, overruns,
             lean=round(lean, 2), speed=round(speed), accel=round(accel),
             loop_us=int(loop_us), overruns=int(overruns),
         )
+    _bal_history.append((time.monotonic(), int(state), pitch, rate, lean, speed, accel))
     pver = int(pver)
     if _mcu_pver is None or pver < _mcu_pver:
         # First telemetry after this app started, or the MCU rebooted: (re)load its parameters.
@@ -496,6 +522,16 @@ def on_balance(state, fault, pitch, rate, lean, speed, accel, loop_us, overruns,
     _mcu_pver = pver
     if int(state) != prev_state:
         if int(state) == ST_FAULT:
+            logger.warning(
+                f"FAULT {int(fault)} ({FAULT_TEXT.get(int(fault), '?')}): pitch={pitch:.2f} deg from balance point, "
+                f"rate={rate:.1f} deg/s, lean_cmd={lean:.2f} deg, wheel_speed={speed:.0f} steps/s, "
+                f"trim={_params['trim']}, axis={_params['axis']}, invert={_params['invert']}, "
+                f"inv_L={_params['invert_left']}, inv_R={_params['invert_right']}"
+            )
+            t_end = _bal_history[-1][0]
+            rows = [f"  t={t - t_end:+6.2f}s st={st} pitch={pi:+6.2f} rate={ra:+7.1f} lean={le:+5.2f} v={v:+7.0f} acc={ac:+7.0f}"
+                    for (t, st, pi, ra, le, v, ac) in list(_bal_history)[-40:]]
+            logger.warning("Balance history before fault (50 ms/row, st: 1=armed 2=balancing):\n" + "\n".join(rows))
             _set_action("FAULT")
             _notice(f"Motors off: {FAULT_TEXT.get(int(fault), 'fault')}. Press Disarm to reset.", "error")
         elif int(state) == ST_BALANCING:
@@ -503,6 +539,16 @@ def on_balance(state, fault, pitch, rate, lean, speed, accel, loop_us, overruns,
         elif int(state) == ST_IDLE:
             _set_action("Stopped")
     ui.send_message("balance", _balance_payload())
+
+
+def _tof_payload():
+    return dict(_tof, status_text=TOF_STATUS_TEXT.get(_tof["status"], "unknown"))
+
+
+# Bridge handler: called from the sketch via Bridge.notify("tof", ...) at 10 Hz.
+def on_tof(mm, status, factor):
+    _tof.update(mm=int(mm), status=int(status), factor=int(factor))
+    ui.send_message("tof", _tof_payload())
 
 
 # Bridge handler: called from the sketch via Bridge.notify("imu", ...) at ~5 Hz.
@@ -537,6 +583,7 @@ ui.on_message("set_mode", on_set_mode)
 ui.on_connect(on_connect)
 Bridge.provide("imu", on_imu)
 Bridge.provide("balance", on_balance)
+Bridge.provide("tof", on_tof)
 
 threading.Thread(target=_sync_worker, daemon=True).start()
 

@@ -490,6 +490,8 @@ function buildParams(payload) {
 
 ui.on_message('params', (payload) => {
   if (!payload?.meta) return;
+  syncAvoid('avoid_en', payload.values?.avoid_en);
+  syncAvoid('avoid_mm', payload.values?.avoid_mm);
   // Rebuild only when the panel is empty; otherwise just refresh values so open groups stay open.
   if (!Object.keys(paramInputs).length) {
     buildParams(payload);
@@ -506,6 +508,7 @@ ui.on_message('params', (payload) => {
 
 // Authoritative single-value update (also covers "Set balance point" and other connected clients).
 ui.on_message('param', (data) => {
+  syncAvoid(data?.name, data?.value);
   const p = paramInputs[data?.name];
   if (!p) return;
   p.range.value = data.value;
@@ -582,3 +585,71 @@ ui.on_message('balance', (data) => {
 });
 
 renderMode('manual');
+
+
+// =====================================================================================
+// VL53L0X obstacle sensor: live reading + avoidance settings. The avoidance itself runs on the
+// MCU; these controls only edit the avoid_en / avoid_mm parameters (persisted like all tuning).
+// =====================================================================================
+const TOF_SCALE_MM = 1200; // sensor's reliable range, right edge of the bar
+const TOF_SLOW_BAND = 1.5; // must match AVOID_SLOW_BAND in sketch.ino (1 + 0.5)
+const tofStatusEl = document.querySelector('#tof-status');
+const tofMmEl = document.querySelector('#tof-mm');
+const tofUnitEl = document.querySelector('#tof-unit');
+const tofFactorEl = document.querySelector('#tof-factor');
+const tofSlowEl = document.querySelector('#tof-slow');
+const tofStopEl = document.querySelector('#tof-stop');
+const tofMarkerEl = document.querySelector('#tof-marker');
+const tofEnableEl = document.querySelector('#tof-enable');
+const tofThrEl = document.querySelector('#tof-thr');
+const tofThrValEl = document.querySelector('#tof-thr-val');
+
+let avoidThr = 300;
+let tofLast = null;
+
+function renderTofBar() {
+  const pct = (mm) => `${Math.min(100, (mm / TOF_SCALE_MM) * 100)}%`;
+  tofStopEl.style.width = pct(avoidThr);
+  tofSlowEl.style.width = pct(avoidThr * TOF_SLOW_BAND);
+  const mm = tofLast?.mm ?? -1;
+  tofMarkerEl.hidden = mm < 0;
+  if (mm >= 0) tofMarkerEl.style.left = pct(mm);
+}
+
+function syncAvoid(name, value) {
+  if (value === undefined || value === null) return;
+  if (name === 'avoid_mm') {
+    avoidThr = Number(value);
+    tofThrEl.value = avoidThr;
+    tofThrValEl.textContent = avoidThr;
+    renderTofBar();
+  } else if (name === 'avoid_en') {
+    tofEnableEl.checked = Number(value) >= 0.5;
+  }
+}
+
+tofThrEl.addEventListener('input', () => {
+  avoidThr = Number(tofThrEl.value);
+  tofThrValEl.textContent = avoidThr;
+  renderTofBar();
+  sendParam('avoid_mm', avoidThr);
+});
+tofThrEl.addEventListener('change', () => sendParam('avoid_mm', tofThrEl.value, true));
+tofEnableEl.addEventListener('change', () => sendParam('avoid_en', tofEnableEl.checked ? 1 : 0, true));
+
+ui.on_message('tof', (data) => {
+  if (!data) return;
+  tofLast = data;
+  const ok = data.status === 1 || data.status === 2;
+  tofStatusEl.textContent = data.status_text ?? '';
+  tofStatusEl.className = `tof-status ${ok ? 'tof-status--ok' : 'tof-status--bad'}`;
+  tofMmEl.textContent = data.status === 1 ? data.mm : (data.status === 2 ? '>1200' : '--');
+  const blocking = ok && data.factor < 100 && tofEnableEl.checked;
+  tofFactorEl.textContent = !ok && data.status !== 0 && tofEnableEl.checked
+    ? 'forward blocked'
+    : (blocking ? (data.factor === 0 ? 'STOP' : `fwd ${data.factor}%`) : '');
+  tofFactorEl.classList.toggle('tof-panel__factor--stop', data.factor === 0 && tofEnableEl.checked && data.status !== 0);
+  tofMmEl.classList.toggle('tof-mm--stop', blocking && data.factor === 0);
+  renderTofBar();
+});
+renderTofBar();

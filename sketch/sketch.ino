@@ -19,6 +19,7 @@
 
 #include <Arduino_RouterBridge.h>
 #include <Wire.h>
+#include <VL53L0X.h>
 
 #include "balance.h"
 #include "mpu6050.h"
@@ -46,6 +47,21 @@ const long MANUAL_MAX_STEPS_PER_SEC = 16000;  // 5 rev/s, cap for the plain (non
 // IMU (MPU6050) on the Qwiic connector, wired to Wire1.
 Mpu6050 imu(Wire1);
 
+// VL53L0X time-of-flight distance sensor on A4/A5, which is the Wire2 bus (the IMU owns Wire1, so
+// the two never share a bus). Forward-facing: used for obstacle avoidance only.
+VL53L0X tof;
+
+// Datasheet operating envelope (default ranging profile): reliable 30 mm..~1200 mm indoors on a
+// light target, +-3% typical accuracy, 25 deg field of view, 8190/8191 mm = "nothing seen".
+// Dark, glass or shiny targets and direct sunlight shorten/corrupt the reading.
+const uint16_t TOF_OUT_OF_RANGE_MM = 8190;   // >= this from the library means "no target"
+const uint16_t TOF_MAX_RELIABLE_MM = 1200;
+const uint16_t TOF_PERIOD_MS = 50;           // 20 Hz continuous ranging
+const uint32_t TOF_TIMING_BUDGET_US = 33000; // library default; must stay < period
+const unsigned long TOF_STALE_MS = 400;      // no fresh reading this long -> treat forward as blocked
+const unsigned long TOF_RETRY_MS = 2000;     // sensor missing: retry init this often
+const float AVOID_SLOW_BAND = 0.5f;          // forward speed ramps down from thr*(1+band) to thr
+
 // ---------------------------------------------------------------------------------------
 // Timing
 // ---------------------------------------------------------------------------------------
@@ -53,6 +69,7 @@ const uint32_t CONTROL_PERIOD_US = 5000;  // 200 Hz
 const float CONTROL_DT = CONTROL_PERIOD_US * 1e-6f;
 const unsigned long COMMAND_TIMEOUT_MS = 500;       // joystick silence -> setpoints to zero
 const unsigned long TELEMETRY_BALANCE_MS = 50;      // 20 Hz
+const unsigned long TELEMETRY_TOF_MS = 100;         // 10 Hz
 const unsigned long TELEMETRY_IMU_MS = 200;         // 5 Hz (raw readouts for the dashboard)
 const int CONTROL_STACK_SIZE = 3072;
 const int CONTROL_PRIORITY = 3;                     // preempts the Bridge thread (5) and loop() (14)
@@ -71,6 +88,12 @@ enum State : uint8_t { ST_IDLE = 0, ST_ARMED = 1, ST_BALANCING = 2, ST_FAULT = 3
 enum Fault : uint8_t { F_NONE = 0, F_FALL = 1, F_RUNAWAY = 2, F_IMU = 3 };
 enum Mode : uint8_t { MODE_MANUAL = 0, MODE_BALANCE = 1 };
 enum Event : uint8_t { EV_NONE = 0, EV_ARMED, EV_ENGAGED, EV_DISARMED, EV_FALL, EV_RUNAWAY, EV_IMU };
+
+// Obstacle avoidance settings (Bridge "set_param"); read by the balance thread.
+float avoidEnabled = 1.0f;  // 0/1
+float avoidMm = 300.0f;     // stop distance; forward motion is scaled to 0 at this distance
+const float AVOID_MIN_MM = 100.0f;  // below this the robot could not stop in time (and 30 mm is the sensor floor)
+const float AVOID_MAX_MM = 800.0f;  // thr*1.5 slow-down band must stay inside the 1200 mm reliable range
 
 jb::Params P;  // live parameters; written by the Bridge thread, read by the balance thread
 
@@ -103,6 +126,8 @@ const ParamEntry PARAM_TABLE[] = {
   {"invert",       &P.invert,       0.0f,    1.0f},
   {"invert_left",  &P.invert_left,  0.0f,    1.0f},
   {"invert_right", &P.invert_right, 0.0f,    1.0f},
+  {"avoid_en",     &avoidEnabled,   0.0f,    1.0f},
+  {"avoid_mm",     &avoidMm,        AVOID_MIN_MM, AVOID_MAX_MM},
 };
 const size_t PARAM_COUNT = sizeof(PARAM_TABLE) / sizeof(PARAM_TABLE[0]);
 
@@ -114,6 +139,9 @@ volatile uint8_t mode = MODE_MANUAL;  // boots in manual: nothing balances until
 volatile uint8_t faultCode = F_NONE;
 volatile uint8_t pendingEvent = EV_NONE;
 volatile bool imuReady = false;
+volatile bool tofReady = false;      // sensor initialised at least once
+volatile int tofMm = -1;             // filtered distance; -1 = no target in range
+volatile unsigned long tofStampMs = 0;
 volatile bool imuCalibrated = false;  // gates every drive/balance command until "calibrate_imu" ran
 
 float gyroBias[3] = {0, 0, 0};  // deg/s, from calibration
@@ -205,11 +233,32 @@ static void publishSnapshot(const ImuSample& s, float pitch, float rate) {
   snapSeq = snapSeq + 1;
 }
 
+// Forward-speed multiplier 0..1 from the ToF sensor. Only ever reduces FORWARD motion; reverse and
+// turning are never restricted, so the operator can always back away. No sensor at all -> 1 (the robot
+// is usable without one); a sensor that was working but went silent -> 0 (fail safe).
+static float avoidFactor() {
+  if (avoidEnabled < 0.5f || !tofReady) return 1.0f;
+  if (millis() - tofStampMs > TOF_STALE_MS) return 0.0f;
+  int mm = tofMm;
+  if (mm < 0) return 1.0f;  // nothing in range
+  float stop = avoidMm;
+  float slow = stop * (1.0f + AVOID_SLOW_BAND);
+  if (mm <= stop) return 0.0f;
+  if (mm >= slow) return 1.0f;
+  return (mm - stop) / (slow - stop);
+}
+
 // Manual mode: raw wheel speeds from the joystick, slew-limited so a sudden stick jump can't
 // exceed what the steppers can accelerate (which would skip steps). Times out to zero.
 static void runManual(const jb::Params& p, float dt) {
   float tl = (float)manualL, tr = (float)manualR;
   if (millis() - manualStampMs > COMMAND_TIMEOUT_MS) tl = tr = 0.0f;
+  float fwdPart = 0.5f * (tl + tr), turnPart = 0.5f * (tl - tr);
+  if (fwdPart > 0.0f) {  // obstacle ahead: scale the forward component only, keep the turn
+    fwdPart *= avoidFactor();
+    tl = fwdPart + turnPart;
+    tr = fwdPart - turnPart;
+  }
   manV[0] = jb::slew(manV[0], tl, p.manual_ramp * dt);
   manV[1] = jb::slew(manV[1], tr, p.manual_ramp * dt);
   stepgen::setSpeeds((int32_t)((p.invert_left >= 0.5f) ? -manV[0] : manV[0]),
@@ -342,6 +391,7 @@ static void controlStep() {
       }
       float fwd = cmdFwd, steer = cmdSteer;
       if (nowMs - cmdStampMs > COMMAND_TIMEOUT_MS) fwd = steer = 0.0f;  // stay upright, stop moving
+      if (fwd > 0.0f) fwd *= avoidFactor();  // the speed loop brakes the robot back to standstill
       float vL, vR;
       balancer.update(p, pitch, rate, dt, fwd, steer, &vL, &vR);
       if (balancer.sat_time > RUNAWAY_SAT_S) {
@@ -492,6 +542,56 @@ bool setParam(String name, float value) {
 }
 
 // ---------------------------------------------------------------------------------------
+// ToF sensor (runs on loop(); the balance thread only reads tofMm / tofStampMs)
+// ---------------------------------------------------------------------------------------
+enum TofStatus : uint8_t { TOF_MISSING = 0, TOF_OK = 1, TOF_NO_TARGET = 2, TOF_TIMEOUT = 3 };
+uint8_t tofStatus = TOF_MISSING;
+unsigned long tofLastInitMs = 0;
+
+static bool tofInit() {
+  tofLastInitMs = millis();
+  if (!tof.init()) return false;
+  tof.setMeasurementTimingBudget(TOF_TIMING_BUDGET_US);
+  tof.startContinuous(TOF_PERIOD_MS);
+  tofReady = true;
+  Serial.println(F("VL53L0X ready on Wire2 (A4/A5)"));
+  return true;
+}
+
+static int median3(int a, int b, int c) {
+  if (a > b) { int t = a; a = b; b = t; }
+  if (b > c) { b = c; }
+  return a > b ? a : b;
+}
+
+// Reads at most one sample per call (blocks <= ~50 ms waiting for it, which is fine on loop()).
+static void tofPoll() {
+  static int h[3] = {-1, -1, -1};
+  if (!tofReady) {
+    tofStatus = TOF_MISSING;
+    if (millis() - tofLastInitMs >= TOF_RETRY_MS || tofLastInitMs == 0) tofInit();
+    return;
+  }
+  uint16_t raw = tof.readRangeContinuousMillimeters();
+  if (tof.timeoutOccurred()) {
+    tofStatus = TOF_TIMEOUT;  // tofStampMs is not refreshed, so avoidFactor() goes fail-safe
+    return;
+  }
+  // No target: map to a huge value so the median treats it as "far" and the stop check stays simple.
+  int mm = (raw >= TOF_OUT_OF_RANGE_MM) ? 9999 : (int)raw;
+  h[0] = h[1]; h[1] = h[2]; h[2] = mm;
+  int m = (h[0] < 0) ? mm : median3(h[0], h[1], h[2]);  // 3-sample median rejects single-frame spikes
+  if (m > TOF_MAX_RELIABLE_MM) {
+    tofMm = -1;
+    tofStatus = TOF_NO_TARGET;
+  } else {
+    tofMm = m;
+    tofStatus = TOF_OK;
+  }
+  tofStampMs = millis();
+}
+
+// ---------------------------------------------------------------------------------------
 // setup / loop (loop = telemetry + event log only)
 // ---------------------------------------------------------------------------------------
 void setup() {
@@ -511,6 +611,9 @@ void setup() {
   Bridge.provide("set_param", setParam);
 
   Serial.begin(115200);
+  Wire2.begin();
+  tof.setBus(&Wire2);
+  tof.setTimeout(100);
   imuReady = imu.begin();
   if (imuReady) {
     Serial.print(F("MPU6050 ready (WHO_AM_I=0x"));
@@ -564,7 +667,15 @@ void loop() {
     Serial.println(eventText(ev));
   }
 
+  tofPoll();
+
   unsigned long now = millis();
+  static unsigned long lastTofMs = 0;
+  if (now - lastTofMs >= TELEMETRY_TOF_MS) {
+    lastTofMs = now;
+    // mm (-1 = no target), status, forward-speed factor in percent
+    Bridge.notify("tof", (int)tofMm, (int)tofStatus, (int)(avoidFactor() * 100.0f + 0.5f));
+  }
   bool dueBalance = now - lastBalanceMs >= TELEMETRY_BALANCE_MS;
   bool dueImu = now - lastImuMs >= TELEMETRY_IMU_MS;
   if (dueBalance || dueImu) {
