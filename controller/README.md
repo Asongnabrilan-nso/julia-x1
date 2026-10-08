@@ -8,6 +8,7 @@ Newest first. Every change to the controller gets an entry here.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-10-08 | 1.2.0 | **No-code setup and responsiveness.** (1) **Pairing:** `robot_host` is no longer needed. The controller scans its WiFi network for the julia-X2 dashboard (port 7000, page title "Julia X2"), lists the robots on the OLED, and you pick one with the stick. The pairing (robot MAC + last IP) is saved in flash; if the robot's IP changes, it rescans and finds it by MAC. Pairing opens by itself when nothing is paired. `robot_host` stays as an optional developer override. (2) **On-device menu** (hold the button 3 s in DRIVE): Calibrate stick (guided, saved in flash), Pair robot, WiFi setup, Info, Test mode. (3) **WiFi setup portal:** phone-based network setup (hotspot `Julia-x2-Joy-Setup`); a saved network overrides `secrets.ini`, and with no network at all the portal opens by itself. (4) **Latency readout:** `joy_ping` round trip in ms on the OLED, the Info page and serial. (5) Link task priority raised above the display; poll interval 2 ms. (6) Partition table now `min_spiffs.csv` (1.9 MB app slots). **One USB flash required**; calibration is kept. **Robot side (`python/main.py`):** joystick commands are now latest-wins (the newest command is never dropped by the 20 Hz limiter), and a `joy_ping` -> `joy_pong` echo was added. **Restart the robot app after updating.** Builds; not yet flashed or tested on hardware. Libraries: + WiFiManager 2.0.17. |
 | 2026-10-08 | 1.1.0 | **Robot control.** The controller now joins the robot dashboard's Socket.IO server (UNO Q, port 7000) as one more client. It sends the web joystick's own `joystick {x,y}` / `stop` messages, so the analog mapping, the dashboard speed slider, manual vs self-balancing handling and arming checks all come from the existing `python/main.py`. **No robot-side changes.** About 16 Hz while deflected, the same 0.15 radial dead zone, `stop` on release, held until the stick is centered after each (re)connect. The link runs in its own FreeRTOS task (connect timeout 2 s). New `robot_host` / `robot_port` in `platformio.ini`. **Buzzer** on D6: beep on button press, chirps on link up/down, double-beep entering TEST mode. **DRIVE/TEST run modes:** DRIVE by default; hold the button at power-up or send `t` for TEST (the step-1 bench tools, never sends to the robot). Calibration commands are TEST-only. OLED drive screen: robot mode/state, ToF distance (with avoidance limit), robot action, sent command, dashboard speed limit. Libraries: WebSockets 2.6.1, ArduinoJson 7.4.2. Builds; **not yet flashed or tested against the robot** (controller off USB, robot not found on the LAN). |
 | 2026-10-08 | 1.0.3 | OLED status screen (U8g2 2.36.18, SSD1306 128×64 I2C assumed; SH1106 is a one-line switch in `src/display.cpp`). Shows a stick-position box (dot filled while the button is pressed), calibrated X/Y, button state, direction, WiFi signal bars, and a CALIBRATING view with raw values. The I2C bus is probed at 0x3C/0x3D at boot; with no display found it logs `[OLED] no display found` and the firmware runs normally. OTA start/failure messages are shown on screen. **Built, not yet flashed:** the board disconnected from USB (COM18 vanished) before the upload. |
 | 2026-10-08 | 1.0.2 | Added a `[STATUS]` heartbeat every 10 s (fw, SSID, IP, RSSI, OTA state), because the boot log is printed before the USB monitor attaches and the IP was never visible. Orientation set from the hardware test: `JOY_SWAP_XY`, `JOY_INVERT_X`, `JOY_INVERT_Y` = `true`. RSSI on this run: −83/−84 dBm (marginal). |
@@ -30,7 +31,9 @@ controller/
     ├── joystick.cpp/.h   reading, filtering, calibration
     ├── display.cpp/.h    OLED drive + test screens
     ├── buzzer.cpp/.h     non-blocking beeps
-    └── robot_link.cpp/.h Socket.IO link to the robot dashboard (own task)
+    ├── robot_link.cpp/.h Socket.IO link to the robot, pairing, latency (own task)
+    ├── discovery.cpp/.h  finds julia-X2 robots on the network (IP + MAC)
+    └── menu.cpp/.h       on-device menu: calibrate, pair, WiFi setup, info
 ```
 
 ## Creating `secrets.ini`
@@ -311,8 +314,8 @@ Don't drive from the dashboard and the controller at the same time. Both send co
 
 ### Setup
 
-1. Find the robot's address: on the UNO Q run `hostname -I`, or use the address you open the dashboard with (`http://<ip>:7000`).
-2. In `platformio.ini` under `[joy]`, set it, e.g. `robot_host = 192.168.1.50` (or `robot_host = myunoq.local`).
+1. **From fw 1.2.0 you don't enter the robot's address.** The controller pairs with it itself; see [Step 3](#step-3-pairing-menu-and-no-code-setup-firmware-120).
+2. (Developer override only) `robot_host = 192.168.1.50` under `[joy]` in `platformio.ini` forces one address and disables pairing. Leave it empty normally.
 3. **The controller must be able to reach the robot.** Put both on the same 2.4 GHz WiFi. On this router the 2.4 GHz and 5 GHz networks don't talk to each other (see the OTA troubleshooting).
 4. Flash, and power up without touching the button.
 
@@ -359,3 +362,95 @@ ToF shows `--` with no telemetry, `n/a` when no sensor is connected, `>1.2m` whe
 5. Turn the robot off, or walk out of range. Expect the falling chirp, `Connecting...`, and the wheels stop within 0.5 s (robot-side timeout).
 6. Switch to self-balancing on the dashboard. The OLED shows `BALANCE: off` / `arm on dashboard`, and stick input is ignored until the robot is armed.
 7. Hold an object in front of the ToF sensor. The distance updates, and the forward % drops to STOP at the dashboard's stop distance.
+
+## Step 3: pairing, menu and no-code setup (firmware 1.2.0)
+
+With 1.2.0, a user only needs the controller and a phone. Calibration, choosing the robot and choosing the WiFi network all happen on the controller.
+
+### One-time update from 1.1.x (developer, USB)
+
+1. **Update the robot app.** `python/main.py` changed (latest-wins joystick and the latency echo). Copy it to the robot and **restart the app** in App Lab.
+2. **Flash the controller over USB once**, because the partition table changed: `pio run -e usb -t upload --upload-port COMxx`. OTA works again afterwards. Stick calibration is kept.
+3. In `platformio.ini`, leave `robot_host =` **empty**.
+4. `secrets.ini` is still needed to *build* (for `ota_password`). The WiFi lines can stay, or be left empty and set up from a phone instead.
+
+### First use (end user)
+
+1. **Power on.**
+   - No WiFi saved: the screen shows **WIFI SETUP**. Do the *WiFi setup* steps below.
+   - WiFi saved but no robot paired: after connecting, the controller searches the network automatically (about 10 s, **PAIR ROBOT**).
+2. **Pick your robot.** The list shows the IP of each julia-X2 found. Push the stick up/down to move, **click** to choose. You'll hear a rising chirp and see **PAIRED**.
+3. **Drive.** The controller remembers the robot. Next time it connects on its own, even if the router gives the robot a new IP (it finds it again by MAC).
+
+The robot must be running its app and be on the **same WiFi network** as the controller. On this router, 2.4 GHz and 5 GHz devices can't see each other.
+
+### The menu
+
+**Hold the stick button for 3 seconds** in DRIVE mode. The robot is told to stop and stays stopped while the menu is open.
+
+| Item | What it does |
+|---|---|
+| Drive (exit menu) | back to driving |
+| Calibrate stick | guided calibration, see below |
+| Pair robot | search again and pick a robot (the current one is marked `*`) |
+| WiFi setup | opens the phone setup hotspot |
+| Info | WiFi, signal, controller IP, paired robot IP, latency |
+| Test mode | the bench tools (value stream, test screen). Send `t` or power-cycle to leave |
+
+Stick up/down = move, click = select.
+
+### Calibrate stick (no PC needed)
+
+1. Menu → **Calibrate stick**.
+2. **Let go of the stick.** It measures the center after a 2 s countdown. If the stick moves, you hear a low beep and it counts down again.
+3. **Sweep the stick around its edge 3–4 times**, then **click**.
+4. **CALIBRATION SAVED** (double beep). It's stored in flash and used every time you drive, including after power-off and firmware updates. On **CALIBRATION FAILED** (long low beep), push fully to every edge and try again.
+
+The center is still re-checked at each power-up (keep the stick released while switching on), because it drifts slightly. The saved range is reused.
+
+### WiFi setup (no PC needed)
+
+1. Menu → **WiFi setup**. This also opens by itself when no network is saved.
+2. On your phone, join the WiFi **`Julia-x2-Joy-Setup`**, password **`julia-x2`**.
+3. A setup page opens. If it doesn't, browse to **http://192.168.4.1**.
+4. Tap **Configure WiFi**, pick your network (2.4 GHz, the same one as the robot), enter its password, **Save**.
+5. The controller joins it and remembers it. A network saved this way **overrides `secrets.ini`**.
+
+The portal closes by itself after 5 minutes. Click the stick to cancel. Serial `u` erases the robot pairing.
+
+### Latency readout
+
+The drive screen footer shows, for example, `spd 100%  45ms (120)`: the dashboard speed limit, the **last command round trip** (controller → robot app → controller), and the worst round trip over the last 5 s. The Info page and serial `i` show it too.
+
+| Round trip | Driving feel |
+|---|---|
+| < 60 ms | crisp |
+| 60–150 ms | fine |
+| > 150 ms, or spikes in the worst value | laggy: see below |
+
+### If driving feels laggy
+
+Work through these in order and watch the latency number after each change:
+
+1. **Signal strength:** the `[STATUS]` line or the Info page should show better than **−75 dBm**. Check the antenna is clicked into the U.FL connector, and move closer to the router. This is the most common cause of lag spikes.
+2. **Robot WiFi power saving:** on the UNO Q (SSH or terminal):
+   ```bash
+   iw dev wlan0 get power_save          # "Power save: on" adds 100-300 ms delays
+   sudo iw dev wlan0 set power_save off
+   ```
+   This resets on reboot. To make it permanent, create `/etc/NetworkManager/conf.d/wifi-powersave.conf` containing:
+   ```ini
+   [connection]
+   wifi.powersave = 2
+   ```
+   then reboot or run `sudo systemctl restart NetworkManager`.
+3. **One driver at a time:** close the dashboard joystick while using the controller. Both send commands.
+4. **Robot app updated?** The latest-wins fix only applies once the new `python/main.py` is running. If the latency shows `--`, the robot app is still the old one (no `joy_pong`).
+
+### Test 7: pairing and menu
+
+1. In the menu, choose **Pair robot**. Your robot's IP should appear (e.g. `192.168.1.205`). Click it: **PAIRED**.
+2. Power-cycle the controller. It reconnects without asking (`[ROBOT] connected` on serial).
+3. Hold 3 s → **Calibrate stick** → complete the steps → **CALIBRATION SAVED**.
+4. Hold 3 s → **Info**. Check the robot IP and latency.
+5. Send `u` (unpair) and reboot. The pairing search opens automatically.

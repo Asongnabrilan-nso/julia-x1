@@ -99,3 +99,21 @@ The robot now balances itself. **Full setup, tuning and run guide: [`docs/BALANC
 backend logic and the dashboard's JavaScript are exercised by tests against a fake Bridge and a
 headless browser; the controller is validated in simulation. **Not yet run on the physical
 robot** — do the guided bring-up in `docs/BALANCING.md` first.
+
+## Step 5 — handheld controller support (Julia-x2 Joy)
+
+The Julia-x2 Joy handheld ([`controller/`](controller/README.md)) connects to the dashboard's
+Socket.IO server on port 7000 as one more client, sending the same `joystick` / `stop` messages
+as the web joystick. Robot-side changes in `python/main.py`:
+
+- **Latest-wins joystick.** `on_joystick` no longer drops a command that arrives inside the
+  20 Hz rate window. It stores the newest `{x, y}`, and a `_joystick_worker` thread applies it at
+  most 20×/s. When a laggy WiFi link delivers several packets at once, the robot now acts on the
+  *most recent* one instead of an older one. A `stop` cancels any queued move, and a lock ensures
+  it is always applied after an in-flight move. The web dashboard benefits too.
+- **Latency echo.** New `joy_ping` → `joy_pong` handler (reply only to the sender), so the
+  handheld can show the command round-trip time.
+
+**After updating, restart the app in App Lab.** If driving feels laggy, check the UNO Q's WiFi
+power saving: `iw dev wlan0 get power_save`, and turn it off as described in the controller
+README, section "If driving feels laggy".

@@ -26,6 +26,7 @@ class Joystick {
   // Samples at JOY_SAMPLE_PERIOD_MS; returns true when a new sample was taken.
   bool update();
   const JoyState& state() const { return s_; }
+  uint32_t heldMs() const { return s_.pressed ? millis() - btnDownMs_ : 0; }  // current press
 
   // Measure the rest position. Blocking (~150 ms). Stick must be released.
   // Returns false (and keeps the previous center) if the stick looks held.

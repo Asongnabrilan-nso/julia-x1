@@ -50,9 +50,15 @@ void drawWifi(int x, int y) {
 //   max speed 100%
 
 const char* headerText(const robot::Telemetry& t) {
-  if (!robot::configured()) return "NO ROBOT HOST";
-  if (WiFi.status() != WL_CONNECTED) return "No WiFi";
-  if (!t.socket) return "Connecting...";
+  switch (t.link) {
+    case robot::LinkState::NoWifi: return "No WiFi";
+    case robot::LinkState::Unpaired: return "NOT PAIRED";
+    case robot::LinkState::Connecting: return "Connecting...";
+    case robot::LinkState::Searching: return "Finding robot...";
+    case robot::LinkState::PairScanning:
+    case robot::LinkState::PairChoose: return "Pairing...";
+    default: break;
+  }
   if (!t.fresh) return "Robot silent";
   if (t.state == robot::ST_FAULT) return "FAULT";
   if (t.mode == robot::MODE_BALANCE) {
@@ -127,10 +133,18 @@ void drawDrive(const Joystick& joy, bool waitingForCenter) {
   } else if (t.fresh && t.state == robot::ST_FAULT) {
     oled.drawStr(0, 63, "disarm on dashboard");
   } else if (t.fresh) {
-    snprintf(buf, sizeof(buf), "max speed %d%%", (int)(t.speedScale * 100 + 0.5f));
+    // Dashboard speed limit + command round-trip latency (worst of last 5 s)
+    if (t.rttMs >= 0) {
+      snprintf(buf, sizeof(buf), "spd %d%%  %dms (%d)", (int)(t.speedScale * 100 + 0.5f), t.rttMs,
+               t.rttMaxMs);
+    } else {
+      snprintf(buf, sizeof(buf), "max speed %d%%", (int)(t.speedScale * 100 + 0.5f));
+    }
     oled.drawStr(0, 63, buf);
-  } else if (robot::configured()) {
-    oled.drawStr(0, 63, ROBOT_HOST);
+  } else if (t.link == robot::LinkState::Unpaired) {
+    oled.drawStr(0, 63, "hold btn 3s: menu");
+  } else if (robot::isPaired()) {
+    oled.drawStr(0, 63, robot::pairedIp().toString().c_str());
   }
 }
 
@@ -208,6 +222,42 @@ bool begin() {
 }
 
 bool present() { return found; }
+
+void drawList(const char* title, const char* const* items, uint8_t n, uint8_t sel) {
+  if (!found) return;
+  constexpr uint8_t kRows = 4;
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(0, 8, title);
+  oled.drawHLine(0, 10, 128);
+  uint8_t first = sel >= kRows ? sel - kRows + 1 : 0;
+  for (uint8_t r = 0; r < kRows && first + r < n; r++) {
+    uint8_t i = first + r;
+    int y = 22 + r * 13;
+    if (i == sel) {
+      oled.drawBox(0, y - 10, 128, 12);
+      oled.setDrawColor(0);
+    }
+    oled.drawStr(4, y, items[i]);
+    oled.setDrawColor(1);
+  }
+  if (first > 0) oled.drawStr(120, 22, "^");
+  if (first + kRows < n) oled.drawStr(120, 61, "v");
+  oled.sendBuffer();
+}
+
+void drawPage(const char* title, const char* l1, const char* l2, const char* l3, const char* l4) {
+  if (!found) return;
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(0, 8, title);
+  oled.drawHLine(0, 10, 128);
+  const char* lines[] = {l1, l2, l3, l4};
+  for (int i = 0; i < 4; i++) {
+    if (lines[i]) oled.drawStr(0, 23 + i * 13, lines[i]);
+  }
+  oled.sendBuffer();
+}
 
 void showMessage(const char* line1, const char* line2) {
   if (!found) return;

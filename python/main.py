@@ -291,19 +291,49 @@ def _broadcast_speed_status(left: float, right: float):
     )
 
 
+# Latest-wins joystick pipeline. Joystick input (web dashboard or the Julia-x2 Joy handheld)
+# is stored here and applied by _joystick_worker at most JOYSTICK_SEND_HZ. Unlike dropping
+# messages that arrive inside the rate window, this never discards the NEWEST command: when a
+# laggy WiFi link delivers several packets at once, the robot acts on the most recent one.
+_joy_pending = None  # (x, y) waiting to be applied, or None
+_joy_cond = threading.Condition()
+_joy_apply_lock = threading.Lock()  # serialises apply vs stop, so a stop always lands last
+
+
 def on_joystick(sid, data):
-    global _last_sent
+    global _joy_pending
+    x = _clamp(float(data.get("x", 0.0)), -1.0, 1.0)  # -1 left, +1 right
+    y = _clamp(float(data.get("y", 0.0)), -1.0, 1.0)  # -1 back, +1 forward
+    with _joy_cond:
+        _joy_pending = (x, y)
+        _joy_cond.notify()
+
+
+def _joystick_worker():
+    global _joy_pending, _last_sent
+    while True:
+        with _joy_cond:
+            while _joy_pending is None:
+                _joy_cond.wait()
+            wait = _last_sent + 1.0 / JOYSTICK_SEND_HZ - time.monotonic()
+            if wait > 0:
+                _joy_cond.wait(timeout=wait)  # newer input may replace _joy_pending meanwhile
+                continue
+            x, y = _joy_pending
+            _joy_pending = None
+            _last_sent = time.monotonic()
+        try:
+            with _joy_apply_lock:
+                _apply_joystick(x, y)
+        except Exception as e:
+            logger.warning(f"joystick apply failed: {e}")
+
+
+def _apply_joystick(x: float, y: float):
     mode, state = _bal["mode"], _bal["state"]
     if mode == MODE_BALANCE and _calibration_status != "calibrated":
         return  # balancing needs a calibrated IMU; manual driving does not
 
-    now = time.monotonic()
-    if now - _last_sent < 1.0 / JOYSTICK_SEND_HZ:
-        return
-    _last_sent = now
-
-    x = _clamp(float(data.get("x", 0.0)), -1.0, 1.0)  # -1 left, +1 right
-    y = _clamp(float(data.get("y", 0.0)), -1.0, 1.0)  # -1 back, +1 forward
     if (x * x + y * y) ** 0.5 < DEADZONE:
         x = y = 0.0
 
@@ -325,11 +355,20 @@ def on_joystick(sid, data):
 
 
 def on_stop(sid, data):
-    _drive(0, 0)
-    Bridge.notify("balance_cmd", 0.0, 0.0)
+    global _joy_pending
+    with _joy_cond:
+        _joy_pending = None  # a queued move must not run after the stop
+    with _joy_apply_lock:  # wait for any in-flight move, then stop
+        _drive(0, 0)
+        Bridge.notify("balance_cmd", 0.0, 0.0)
     _set_action("Stopped")
     _broadcast_speed_status(0, 0)
     logger.info("Stop requested from joystick UI")
+
+
+def on_joy_ping(sid, data):
+    # Julia-x2 Joy handheld measures command round-trip latency with this echo (sender only).
+    ui.send_message("joy_pong", data, room=sid)
 
 
 def on_speed(sid, data):
@@ -572,6 +611,7 @@ _load_params()
 
 ui.on_message("joystick", on_joystick)
 ui.on_message("stop", on_stop)
+ui.on_message("joy_ping", on_joy_ping)
 ui.on_message("speed", on_speed)
 ui.on_message("calibrate_imu", on_calibrate_imu)
 ui.on_message("set_param", on_set_param)
@@ -586,5 +626,6 @@ Bridge.provide("balance", on_balance)
 Bridge.provide("tof", on_tof)
 
 threading.Thread(target=_sync_worker, daemon=True).start()
+threading.Thread(target=_joystick_worker, daemon=True).start()
 
 App.run()

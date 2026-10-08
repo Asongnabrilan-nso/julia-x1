@@ -2,11 +2,14 @@
 //
 // Two run modes, chosen at power-up:
 //
-//   DRIVE (default)  Joins the robot's dashboard server and drives the robot
+//   DRIVE (default)  Joins the PAIRED robot's dashboard server and drives it
 //                    with the stick, in whichever mode the robot is in
 //                    (manual or self-balancing; mode, arming and tuning stay on
 //                    the web dashboard). OLED shows robot mode, ToF distance,
-//                    robot direction and the command being sent.
+//                    robot direction, the command being sent and latency.
+//                    Hold the button 3 s for the MENU: calibrate stick, pair
+//                    robot, WiFi setup, info, test mode. With nothing paired,
+//                    pairing opens by itself.
 //
 //   TEST             Hold the stick button while powering up, or send 't'.
 //                    The bench tools: serial value stream, raw/calibrated
@@ -14,7 +17,7 @@
 //                    anything to the robot.
 //
 // Serial console (115200), single-key commands:
-//   h help   i info   w WiFi scan   t toggle TEST/DRIVE mode
+//   h help   i info   w WiFi scan   t toggle TEST/DRIVE mode   u unpair robot
 //   TEST mode only:  s stream on/off   p print cal   r recenter
 //                    c start/finish range cal   x reset cal
 //
@@ -27,6 +30,7 @@
 #include "config.h"
 #include "display.h"
 #include "joystick.h"
+#include "menu.h"
 #include "ota.h"
 #include "robot_link.h"
 
@@ -108,9 +112,28 @@ void runTestMode() {
 // once, so a stick that is already deflected can't make the robot lurch.
 bool driveArmed = false;
 bool wasConnected = false;
+robot::LinkState prevLink = robot::LinkState::NoWifi;
+
+void setRunMode(RunMode m);
 
 void runDriveMode() {
   const JoyState& s = joy.state();
+  robot::LinkState link = robot::snapshot().link;
+
+  // Nothing paired: the link starts a pairing scan by itself; show it.
+  if (link == robot::LinkState::PairScanning && prevLink != link && !menu::active()) {
+    menu::openPairing();
+  }
+  prevLink = link;
+
+  if (!menu::active() && joy.heldMs() >= MENU_HOLD_MS) menu::open();
+  if (menu::active()) {
+    robot::setStick(0, 0);  // the robot never moves while the menu is open
+    driveArmed = false;
+    if (menu::update(joy) == menu::Action::EnterTestMode) setRunMode(RunMode::Test);
+    return;
+  }
+
   bool connected = robot::connected();
 
   if (connected != wasConnected) {
@@ -139,7 +162,7 @@ void setRunMode(RunMode m) {
 
 void printHelp() {
   Serial.println(
-      "commands: h help | i info | w wifi scan | t toggle TEST/DRIVE mode\n"
+      "commands: h help | i info | w wifi scan | t toggle TEST/DRIVE mode | u unpair robot\n"
       "TEST only: s stream | p print cal | r recenter | c start/finish range cal | x reset cal");
 }
 
@@ -153,6 +176,7 @@ void handleSerial() {
         robot::printStatus(Serial);
         break;
       case 'w': ota::scan(Serial); break;
+      case 'u': robot::forget(); break;
       case 't': setRunMode(runMode == RunMode::Test ? RunMode::Drive : RunMode::Test); break;
       case '\r': case '\n': case ' ': break;
       default:
@@ -212,6 +236,7 @@ void loop() {
   else runDriveMode();
 
   statusHeartbeat();
+  if (menu::active()) return;  // the menu draws its own screens
   display::update(runMode == RunMode::Test ? display::Screen::Test : display::Screen::Drive, joy,
                   runMode == RunMode::Drive && robot::connected() && !driveArmed);
 }

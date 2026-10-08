@@ -74,3 +74,28 @@ constexpr uint32_t LINK_SEND_PERIOD_MS = 60;
 constexpr uint32_t LINK_STALE_MS       = 1000;  // no "balance" telemetry -> link shown as down
 constexpr uint32_t LINK_RECONNECT_MS   = 2000;
 constexpr float    ROBOT_DEADZONE      = 0.15f; // must match DEADZONE in python/main.py
+
+// Latency readout: the controller pings the robot app ("joy_ping" -> "joy_pong")
+// and shows the round trip in ms on the OLED / serial.
+constexpr uint32_t RTT_PING_MS   = 1000;
+constexpr uint32_t RTT_WINDOW_MS = 5000;  // "max" is the worst RTT in this window
+
+// ---------------------------------------------------------------------------
+// Pairing / discovery (no robot address needed in code)
+// ---------------------------------------------------------------------------
+constexpr char     ROBOT_PAGE_MARKER[]  = "Julia X2";  // in the dashboard's <title>
+constexpr int      DISCOVERY_BATCH      = 10;     // parallel probes (lwIP allows 16 sockets)
+constexpr uint32_t DISCOVERY_CONNECT_MS = 400;    // per batch: ~10 s for a whole /24
+constexpr uint32_t DISCOVERY_HTTP_MS    = 1500;   // confirm-it's-a-julia-X2 request
+constexpr uint32_t LINK_SEARCH_AFTER_MS = 6000;   // paired robot silent this long -> rescan by MAC
+constexpr uint32_t LINK_SEARCH_EVERY_MS = 15000;  // ...and at most this often
+
+// ---------------------------------------------------------------------------
+// On-device menu & WiFi setup portal
+// ---------------------------------------------------------------------------
+constexpr uint32_t MENU_HOLD_MS      = 3000;  // hold the stick button this long in DRIVE mode
+constexpr int16_t  MENU_NAV_THRESHOLD = 600;  // of 1000: stick push that moves the cursor
+constexpr uint32_t MENU_NAV_REPEAT_MS = 350;
+constexpr char     PORTAL_SSID[]      = "Julia-x2-Joy-Setup";
+constexpr char     PORTAL_PASSWORD[]  = "julia-x2";  // min 8 chars (WPA2)
+constexpr uint32_t PORTAL_TIMEOUT_S   = 300;         // portal closes itself after 5 min

@@ -1,8 +1,11 @@
 #include "ota.h"
 
 #include <ArduinoOTA.h>
+#include <Preferences.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 
+#include "config.h"
 #include "display.h"
 
 namespace ota {
@@ -12,6 +15,15 @@ bool otaStarted = false;
 bool wasConnected = false;
 volatile bool updating = false;
 int lastPct = -1;
+
+// WiFi credentials: a network saved from the setup portal (flash) takes
+// priority over the compiled-in secrets.ini values, so end users never need
+// to rebuild the firmware to change networks.
+String ssid, pass;
+WiFiManager wm;
+bool portal = false;
+
+constexpr char kNvsNs[] = "wifi";
 
 void setupArduinoOta() {
   ArduinoOTA.setHostname(OTA_HOSTNAME);
@@ -48,25 +60,102 @@ void setupArduinoOta() {
   });
 }
 
+void loadCredentials() {
+  Preferences p;
+  if (p.begin(kNvsNs, true)) {
+    ssid = p.getString("ssid", "");
+    pass = p.getString("pass", "");
+    p.end();
+  }
+  if (ssid.length()) {
+    Serial.printf("[WiFi] using network saved from the setup portal: \"%s\"\n", ssid.c_str());
+  } else if (strlen(WIFI_SSID)) {
+    ssid = WIFI_SSID;
+    pass = WIFI_PASSWORD;
+    Serial.printf("[WiFi] using network from secrets.ini: \"%s\"\n", ssid.c_str());
+  }
+}
+
+void connectStation() {
+  WiFi.mode(portal ? WIFI_AP_STA : WIFI_STA);
+  WiFi.setHostname(OTA_HOSTNAME);
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false);  // no modem sleep: lower, steadier latency for control packets
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  Serial.printf("[WiFi] connecting to \"%s\"...\n", ssid.c_str());
+}
+
+void onPortalSaved() {
+  ssid = wm.getWiFiSSID();
+  pass = wm.getWiFiPass();
+  Preferences p;
+  if (p.begin(kNvsNs, false)) {
+    p.putString("ssid", ssid);
+    p.putString("pass", pass);
+    p.end();
+  }
+  Serial.printf("[WiFi] setup portal saved network \"%s\"\n", ssid.c_str());
+}
+
 }  // namespace
 
 void begin() {
-  if (strlen(WIFI_SSID) == 0) {
-    Serial.println("[WiFi] no SSID configured (secrets.ini) - OTA disabled");
+  setupArduinoOta();
+  loadCredentials();
+  if (ssid.length() == 0) {
+    Serial.println("[WiFi] no network configured - opening the setup portal");
+    startPortal();
     return;
   }
-  WiFi.mode(WIFI_STA);
-  WiFi.setHostname(OTA_HOSTNAME);
-  WiFi.setAutoReconnect(true);
-  WiFi.setSleep(false);  // lower, steadier latency for control packets later
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  setupArduinoOta();
-  Serial.printf("[WiFi] connecting to \"%s\"...\n", WIFI_SSID);
+  connectStation();
 }
 
-void handle() {
-  bool connected = WiFi.status() == WL_CONNECTED;
+void startPortal() {
+  if (portal) return;
+  portal = true;
+  wm.setConfigPortalBlocking(false);
+  wm.setConfigPortalTimeout(PORTAL_TIMEOUT_S);
+  wm.setSaveConfigCallback(onPortalSaved);
+  wm.setBreakAfterConfig(true);  // close the portal after saving, even if the join fails
+  wm.setTitle("Julia-x2 Joy WiFi setup");
+  WiFi.mode(WIFI_AP_STA);
+  wm.startConfigPortal(PORTAL_SSID, PORTAL_PASSWORD);
+  Serial.printf("[WiFi] setup portal open: join \"%s\" (password %s), then open http://192.168.4.1\n",
+                PORTAL_SSID, PORTAL_PASSWORD);
+}
 
+void stopPortal() {
+  if (!portal) return;
+  wm.stopConfigPortal();
+  portal = false;
+  Serial.println("[WiFi] setup portal closed");
+  if (ssid.length()) connectStation();
+}
+
+bool portalActive() { return portal; }
+
+void forgetWifi() {
+  Preferences p;
+  if (p.begin(kNvsNs, false)) {
+    p.clear();
+    p.end();
+  }
+  Serial.println("[WiFi] saved network erased (secrets.ini value, if any, applies after reboot)");
+}
+
+String currentSsid() { return ssid; }
+
+void handle() {
+  if (portal) {
+    wm.process();
+    if (!wm.getConfigPortalActive()) {  // saved, timed out, or closed from the page
+      portal = false;
+      Serial.println("[WiFi] setup portal finished");
+      if (ssid.length()) connectStation();
+    }
+  }
+
+  bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !wasConnected) {
     Serial.printf("[WiFi] connected  ip=%s  rssi=%d dBm\n",
                   WiFi.localIP().toString().c_str(), WiFi.RSSI());
@@ -90,24 +179,25 @@ bool inProgress() { return updating; }
 void printStatus(Print& out) {
   out.printf("fw %s  host %s\n", FW_VERSION, OTA_HOSTNAME);
   if (wifiConnected()) {
-    out.printf("WiFi \"%s\"  ip %s  rssi %d dBm  OTA %s\n", WIFI_SSID,
-               WiFi.localIP().toString().c_str(), WiFi.RSSI(),
-               otaStarted ? "ready" : "off");
+    out.printf("WiFi \"%s\"  ip %s  rssi %d dBm  OTA %s\n", ssid.c_str(),
+               WiFi.localIP().toString().c_str(), WiFi.RSSI(), otaStarted ? "ready" : "off");
   } else {
-    out.printf("WiFi \"%s\" not connected (status %d)\n", WIFI_SSID, WiFi.status());
+    out.printf("WiFi \"%s\" not connected (status %d)%s\n", ssid.c_str(), WiFi.status(),
+               portal ? "  [setup portal open]" : "");
   }
 }
 
 void printStatusLine(Print& out) {
   if (wifiConnected()) {
     out.printf("[STATUS] fw %s | WiFi \"%s\" ip %s %d dBm | OTA %s.local %s\n", FW_VERSION,
-               WIFI_SSID, WiFi.localIP().toString().c_str(), WiFi.RSSI(), OTA_HOSTNAME,
+               ssid.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI(), OTA_HOSTNAME,
                otaStarted ? "ready" : "off");
-  } else if (strlen(WIFI_SSID) == 0) {
-    out.printf("[STATUS] fw %s | WiFi disabled (no SSID)\n", FW_VERSION);
+  } else if (portal) {
+    out.printf("[STATUS] fw %s | WiFi setup portal open: join \"%s\" (pw %s), http://192.168.4.1\n",
+               FW_VERSION, PORTAL_SSID, PORTAL_PASSWORD);
   } else {
     out.printf("[STATUS] fw %s | WiFi \"%s\" NOT connected (status %d) - send 'w' to scan\n",
-               FW_VERSION, WIFI_SSID, WiFi.status());
+               FW_VERSION, ssid.c_str(), WiFi.status());
   }
 }
 
@@ -120,13 +210,13 @@ void scan(Print& out) {
   }
   bool found = false;
   for (int i = 0; i < n; i++) {
-    bool match = WiFi.SSID(i) == WIFI_SSID;
+    bool match = WiFi.SSID(i) == ssid;
     found |= match;
     out.printf("  %c %-32s ch %2d  %4d dBm  %s\n", match ? '*' : ' ', WiFi.SSID(i).c_str(),
                WiFi.channel(i), WiFi.RSSI(i),
                WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "open" : "secured");
   }
-  out.printf("[WiFi] %d networks; \"%s\" %s\n", n, WIFI_SSID,
+  out.printf("[WiFi] %d networks; \"%s\" %s\n", n, ssid.c_str(),
              found ? "FOUND (*)" : "NOT FOUND - check spelling/case, 2.4 GHz, antenna");
   WiFi.scanDelete();
 }
