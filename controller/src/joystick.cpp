@@ -123,6 +123,7 @@ void Joystick::updateButton(uint32_t now) {
     if (raw) {
       btnDownMs_ = now;
       longFired_ = false;
+      s_.event = ButtonEvent::Down;
     } else if (!longFired_) {
       s_.event = ButtonEvent::Click;
     }

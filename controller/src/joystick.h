@@ -8,7 +8,7 @@ struct JoyCalibration {
 };
 
 enum class JoyDir : uint8_t { Stop, Forward, Backward, Left, Right };
-enum class ButtonEvent : uint8_t { None, Click, LongPress };
+enum class ButtonEvent : uint8_t { None, Down, Click, LongPress };  // Down = press edge
 
 struct JoyState {
   uint16_t rawX = 0, rawY = 0;  // filtered ADC counts (0..4095), physical pins

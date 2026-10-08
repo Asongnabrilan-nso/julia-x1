@@ -3,6 +3,8 @@
 #include <ArduinoOTA.h>
 #include <WiFi.h>
 
+#include "display.h"
+
 namespace ota {
 namespace {
 
@@ -17,6 +19,7 @@ void setupArduinoOta() {
 
   ArduinoOTA.onStart([]() {
     updating = true;
+    display::showMessage("OTA update...", "do not power off");
     lastPct = -1;
     Serial.printf("[OTA] start (%s)\n",
                   ArduinoOTA.getCommand() == U_FLASH ? "firmware" : "filesystem");
@@ -40,6 +43,7 @@ void setupArduinoOta() {
                     : err == OTA_END_ERROR       ? "end failed"
                                                  : "unknown";
     Serial.printf("[OTA] error %u: %s\n", err, why);
+    display::showMessage("OTA failed", why);
     updating = false;
   });
 }
@@ -92,6 +96,39 @@ void printStatus(Print& out) {
   } else {
     out.printf("WiFi \"%s\" not connected (status %d)\n", WIFI_SSID, WiFi.status());
   }
+}
+
+void printStatusLine(Print& out) {
+  if (wifiConnected()) {
+    out.printf("[STATUS] fw %s | WiFi \"%s\" ip %s %d dBm | OTA %s.local %s\n", FW_VERSION,
+               WIFI_SSID, WiFi.localIP().toString().c_str(), WiFi.RSSI(), OTA_HOSTNAME,
+               otaStarted ? "ready" : "off");
+  } else if (strlen(WIFI_SSID) == 0) {
+    out.printf("[STATUS] fw %s | WiFi disabled (no SSID)\n", FW_VERSION);
+  } else {
+    out.printf("[STATUS] fw %s | WiFi \"%s\" NOT connected (status %d) - send 'w' to scan\n",
+               FW_VERSION, WIFI_SSID, WiFi.status());
+  }
+}
+
+void scan(Print& out) {
+  out.println("[WiFi] scanning (~3 s)...");
+  int n = WiFi.scanNetworks();
+  if (n <= 0) {
+    out.println("[WiFi] no networks found - is the antenna attached?");
+    return;
+  }
+  bool found = false;
+  for (int i = 0; i < n; i++) {
+    bool match = WiFi.SSID(i) == WIFI_SSID;
+    found |= match;
+    out.printf("  %c %-32s ch %2d  %4d dBm  %s\n", match ? '*' : ' ', WiFi.SSID(i).c_str(),
+               WiFi.channel(i), WiFi.RSSI(i),
+               WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "open" : "secured");
+  }
+  out.printf("[WiFi] %d networks; \"%s\" %s\n", n, WIFI_SSID,
+             found ? "FOUND (*)" : "NOT FOUND - check spelling/case, 2.4 GHz, antenna");
+  WiFi.scanDelete();
 }
 
 }  // namespace ota

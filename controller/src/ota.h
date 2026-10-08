@@ -10,5 +10,7 @@ void handle();             // call every loop iteration
 bool wifiConnected();
 bool inProgress();         // true while a firmware upload is being received
 void printStatus(Print& out);
+void printStatusLine(Print& out);  // compact one-line heartbeat
+void scan(Print& out);     // list visible networks, marking the configured SSID
 
 }  // namespace ota
