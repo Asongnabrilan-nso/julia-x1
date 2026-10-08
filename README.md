@@ -2,6 +2,9 @@
 
 Tele-operated self-balancing robot on Arduino UNO Q + CNC shield.
 
+> **Handheld controller:** the Julia-x2 Joy WiFi joystick (XIAO ESP32C3, PlatformIO) lives in
+> [`controller/`](controller/README.md). Its README holds its own changelog, setup and test steps.
+
 ## Step 1 — motor control interface (this commit)
 
 - `sketch/sketch.ino`: drives the two CNC-shield steppers (left STEP=D2/DIR=D5,
