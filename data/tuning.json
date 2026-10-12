@@ -1,11 +1,11 @@
 {
   "angle_kp": 28900.0,
   "avoid_en": 0.0,
+  "axis": 1.0,
   "fall_deg": 60.0,
-  "invert": 1.0,
   "invert_left": 1.0,
   "invert_right": 1.0,
   "steer_max": 15200.0,
-  "trim": 5.02,
-  "wheel_mm": 95.3
+  "trim": -3.67,
+  "wheel_mm": 96.0
 }

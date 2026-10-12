@@ -653,3 +653,28 @@ ui.on_message('tof', (data) => {
   renderTofBar();
 });
 renderTofBar();
+
+
+// =====================================================================================
+// TFT face: mood override + one-shot animations. The eyes are drawn by the MCU (sketch/face.cpp);
+// this only picks the mood ("auto" = follow the robot's state) and triggers animations.
+// =====================================================================================
+const faceEl = document.querySelector('#face');
+const faceMoodBtns = document.querySelectorAll('#face [data-mood]');
+
+document.querySelector('#face-open').addEventListener('click', () => { faceEl.hidden = false; });
+document.querySelector('#face-close').addEventListener('click', () => { faceEl.hidden = true; });
+faceMoodBtns.forEach((btn) => {
+  btn.addEventListener('click', () => ui.send_message('face_mood', { mood: btn.dataset.mood }));
+});
+document.querySelectorAll('#face [data-anim]').forEach((btn) => {
+  btn.addEventListener('click', () => ui.send_message('face_anim', { anim: btn.dataset.anim }));
+});
+
+ui.on_message('face', (data) => {
+  faceMoodBtns.forEach((btn) => {
+    const active = btn.dataset.mood === data?.mood;
+    btn.classList.toggle('tune-btn--active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+});

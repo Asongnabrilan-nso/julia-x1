@@ -88,6 +88,10 @@ PARAMS = [
      "balancing robot (it needs room to brake). Sensor range: 30-1200 mm on light targets."),
 ]
 PARAM_META = {p[0]: p for p in PARAMS}
+
+# TFT face (sketch/face.cpp). List index = code sent to the MCU; must match face::Mood / face::Anim.
+FACE_MOODS = ["auto", "neutral", "happy", "tired", "angry"]
+FACE_ANIMS = {"blink": 1, "laugh": 2, "confused": 3}
 PARAM_DEFAULTS = {p[0]: p[4] for p in PARAMS}
 
 logger = Logger("julia-x2")
@@ -130,6 +134,7 @@ _bal = {
 # Latest VL53L0X reading (Bridge.notify("tof", ...)). The avoidance itself runs on the MCU.
 TOF_STATUS_TEXT = {0: "not detected", 1: "ok", 2: "no target in range", 3: "no response"}
 _tof = {"mm": -1, "status": 0, "factor": 100}  # mm -1 = nothing in range; factor = forward speed %
+_face_mood = "auto"  # operator's mood override for the TFT face; "auto" = follows the robot's state
 _bal_lock = threading.Lock()
 _bal_history = deque(maxlen=120)  # last ~6 s of balance frames, dumped to the log on a fault
 _mcu_pver = None  # MCU's count of set_param calls since boot; a decrease means the MCU rebooted
@@ -236,6 +241,7 @@ def _sync_worker():
         if _resync_needed.wait(timeout=0.5):
             _resync_needed.clear()
             _push_all_params()
+            Bridge.notify("face_mood", FACE_MOODS.index(_face_mood))  # a rebooted MCU forgot the override
             try:  # a rebooted MCU has lost its calibration; a restarted Python app has lost ours
                 calibrated = bool(Bridge.call("imu_status"))
             except Exception:
@@ -526,6 +532,26 @@ def on_balance_arm(sid, data):
     threading.Thread(target=_run, daemon=True).start()
 
 
+# ---------------------------------------------------------------------------------------
+# TFT face
+# ---------------------------------------------------------------------------------------
+def on_face_mood(sid, data):
+    global _face_mood
+    mood = str(data.get("mood", ""))
+    if mood not in FACE_MOODS:
+        return
+    _face_mood = mood
+    Bridge.notify("face_mood", FACE_MOODS.index(mood))
+    ui.send_message("face", {"mood": _face_mood})
+    logger.info(f"Face mood: {mood}")
+
+
+def on_face_anim(sid, data):
+    code = FACE_ANIMS.get(str(data.get("anim", "")))
+    if code is not None:
+        Bridge.notify("face_anim", code)
+
+
 def on_connect(sid):
     _set_action(_current_action, sid=sid)
     _set_speed_scale(_speed_scale, sid=sid)
@@ -533,6 +559,7 @@ def on_connect(sid):
     ui.send_message("balance", _balance_payload(), room=sid)
     ui.send_message("tof", _tof_payload(), room=sid)
     ui.send_message("calibration_status", {"status": _calibration_status}, room=sid)
+    ui.send_message("face", {"mood": _face_mood}, room=sid)
     _broadcast_params(sid)
 
 
@@ -620,6 +647,8 @@ ui.on_message("save_params", on_save_params)
 ui.on_message("capture_trim", on_capture_trim)
 ui.on_message("balance_arm", on_balance_arm)
 ui.on_message("set_mode", on_set_mode)
+ui.on_message("face_mood", on_face_mood)
+ui.on_message("face_anim", on_face_anim)
 ui.on_connect(on_connect)
 Bridge.provide("imu", on_imu)
 Bridge.provide("balance", on_balance)

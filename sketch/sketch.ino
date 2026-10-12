@@ -11,6 +11,7 @@
 //                                                 slow UART / lost WiFi cannot upset balance.
 //   3. "bridge" thread ............ library     : services RPCs from Python (params, commands)
 //   4. loop() (main thread) ....... this file   : publishes telemetry to Python, prints events
+//   5. "face" thread .............. face.cpp    : animated eyes on the TFT (same priority as loop())
 //
 // The balance loop is fully autonomous: once armed, the robot keeps itself upright with no help
 // from the Linux side. If Python or WiFi dies the joystick command simply times out to zero.
@@ -22,6 +23,7 @@
 #include <VL53L0X.h>
 
 #include "balance.h"
+#include "face.h"
 #include "mpu6050.h"
 #include "step_gen.h"
 
@@ -431,6 +433,7 @@ static void controlEntry(void*, void*, void*) {
 }
 
 static bool useLoopFallback = false;
+static bool faceInLoop = false;  // no stack for the face thread: draw from loop() instead
 
 // ---------------------------------------------------------------------------------------
 // Bridge API (called from Python)
@@ -527,6 +530,12 @@ void balanceCmd(float fwd, float steer) {
   cmdStampMs = millis();
 }
 
+// "face_mood": 0 = automatic (follows the robot's state), 1..4 = neutral/happy/tired/angry.
+void faceMood(int mood) { face::setMood((uint8_t)mood); }
+
+// "face_anim": one-shot animation, 1 = blink, 2 = laugh, 3 = confused.
+void faceAnim(int anim) { face::play((uint8_t)anim); }
+
 // "set_param": name must match PARAM_TABLE. Returns false for unknown names / out-of-range values.
 bool setParam(String name, float value) {
   for (size_t i = 0; i < PARAM_COUNT; ++i) {
@@ -609,6 +618,8 @@ void setup() {
   Bridge.provide("balance_cmd", balanceCmd);
   Bridge.provide("set_mode", setMode);
   Bridge.provide("set_param", setParam);
+  Bridge.provide("face_mood", faceMood);
+  Bridge.provide("face_anim", faceAnim);
 
   Serial.begin(115200);
   Wire2.begin();
@@ -636,6 +647,30 @@ void setup() {
     useLoopFallback = true;
     Serial.println(F("WARNING: no stack for the balance thread -- running degraded in loop()"));
   }
+
+  // Started after the balance thread so it can never take that thread's stack.
+  faceInLoop = !face::begin();
+  if (faceInLoop) Serial.println(F("WARNING: no stack for the face thread -- drawing from loop()"));
+}
+
+// What the face reacts to: robot state, the current drive command and the ToF sensor.
+static void observeForFace() {
+  unsigned long now = millis();
+  float fwd = 0.0f, steer = 0.0f;
+  if (mode == MODE_MANUAL) {
+    if (now - manualStampMs <= COMMAND_TIMEOUT_MS) {
+      float l = (float)manualL / MANUAL_MAX_STEPS_PER_SEC, r = (float)manualR / MANUAL_MAX_STEPS_PER_SEC;
+      fwd = 0.5f * (l + r);
+      steer = 0.5f * (l - r);
+    }
+  } else if (now - cmdStampMs <= COMMAND_TIMEOUT_MS) {
+    fwd = cmdFwd;
+    steer = cmdSteer;
+  }
+  int mm = tofMm;
+  bool near = tofReady && mm >= 0 && mm <= avoidMm * (1.0f + AVOID_SLOW_BAND);
+  bool blocked = fwd > 0.0f && avoidFactor() <= 0.0f;
+  face::observe(state, fwd, steer, near, blocked);
 }
 
 static const char* eventText(uint8_t e) {
@@ -668,6 +703,10 @@ void loop() {
   }
 
   tofPoll();
+
+  observeForFace();
+  if (faceInLoop) face::service();
+  if (const char* faceLog = face::takeLog()) Serial.println(faceLog);
 
   unsigned long now = millis();
   static unsigned long lastTofMs = 0;

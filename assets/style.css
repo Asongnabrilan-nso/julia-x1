@@ -628,6 +628,12 @@ button:disabled { opacity: 0.35; cursor: default; }
 .tune-btn:active { background: var(--fill); }
 .tune-btn--danger { color: var(--red); }
 .tune__note { margin: 0 4px; font-size: 0.78rem; color: var(--text-2); }
+.tune-btn--active { background: var(--accent); color: var(--accent-text); }
+.tune-btn--active:active { background: var(--accent); }
+
+/* ---------- face sheet (reuses the tuning sheet layout) ---------- */
+.face-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.face-grid .tune-btn { flex: 1 1 110px; }
 
 .pgroup { border-radius: var(--radius); background: var(--card); overflow: hidden; }
 .pgroup > summary {

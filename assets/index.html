@@ -19,6 +19,7 @@ SPDX-License-Identifier: MPL-2.0
         <h1>Julia X2</h1>
         <span id="status" class="status status--offline">Connecting…</span>
         <div id="action" class="action-badge">Idle</div>
+        <button id="face-open" class="header-btn" type="button">Face</button>
         <button id="tune-open" class="header-btn" type="button">Tune</button>
       </header>
 
@@ -168,6 +169,37 @@ SPDX-License-Identifier: MPL-2.0
           <button id="tune-reset" class="tune-btn tune-btn--danger" type="button">Reset to defaults</button>
         </div>
         <p class="tune__note">Changes apply to the robot instantly and are saved automatically.</p>
+      </div>
+    </section>
+
+    <section id="face" class="tune" hidden aria-label="Face display">
+      <div class="tune__bar">
+        <h2>Face</h2>
+        <button id="face-close" class="header-btn" type="button">Close</button>
+      </div>
+
+      <div class="tune__scroll">
+        <div class="card">
+          <div class="card__title"><span>Mood</span></div>
+          <div class="face-grid">
+            <button class="tune-btn" type="button" data-mood="auto">Auto</button>
+            <button class="tune-btn" type="button" data-mood="neutral">Neutral</button>
+            <button class="tune-btn" type="button" data-mood="happy">Happy</button>
+            <button class="tune-btn" type="button" data-mood="tired">Tired</button>
+            <button class="tune-btn" type="button" data-mood="angry">Angry</button>
+          </div>
+          <p class="tune__note">Auto follows the robot: cyan and calm when idle, amber while waiting to be held
+            upright, happy while balancing, tired after a fall. Any other mood stays until you pick Auto again.</p>
+        </div>
+
+        <div class="card">
+          <div class="card__title"><span>Play once</span></div>
+          <div class="face-grid">
+            <button class="tune-btn" type="button" data-anim="blink">Blink</button>
+            <button class="tune-btn" type="button" data-anim="laugh">Laugh</button>
+            <button class="tune-btn" type="button" data-anim="confused">Confused</button>
+          </div>
+        </div>
       </div>
     </section>
 
