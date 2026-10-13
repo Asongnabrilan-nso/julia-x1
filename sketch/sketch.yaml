@@ -7,5 +7,4 @@ profiles:
       - Adafruit BusIO (1.17.4)
       - Adafruit GFX Library (1.12.6)
       - Adafruit ILI9341 (1.6.4)
-      - FluxGarage RoboEyes (1.1.1)
 default_profile: default

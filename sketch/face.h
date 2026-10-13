@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-// julia-X2 face: FluxGarage RoboEyes on a 2.8" ILI9341 320x240 SPI TFT.
+// julia-X2 face: spring-animated eyes (after Grobot_Animations) on a 2.8" ILI9341 320x240 SPI TFT.
 //
 // The face runs in its own low-priority thread (same priority as loop(), far below the balance
 // thread). loop() hands it a snapshot of what the robot is doing via observe(); the face picks a
@@ -24,13 +24,22 @@ const uint8_t PIN_DC = 9;
 const uint8_t PIN_RST = 7;  // CNC shield Z-axis DIR: free because no Z driver is fitted
 
 // Moods for "face_mood". AUTO = follow the robot's state. Must match FACE_MOODS in python/main.py.
-enum Mood : uint8_t { MOOD_AUTO = 0, MOOD_NEUTRAL, MOOD_HAPPY, MOOD_TIRED, MOOD_ANGRY, MOOD_COUNT };
+// SHOWCASE cycles through all the others on its own.
+enum Mood : uint8_t {
+  MOOD_AUTO = 0, MOOD_NEUTRAL, MOOD_HAPPY, MOOD_TIRED, MOOD_ANGRY,
+  MOOD_SAD, MOOD_SURPRISED, MOOD_SUSPICIOUS, MOOD_LOVE, MOOD_SHOWCASE, MOOD_COUNT
+};
 // One-shot animations for "face_anim". Must match FACE_ANIMS in python/main.py.
-enum Anim : uint8_t { ANIM_NONE = 0, ANIM_BLINK, ANIM_LAUGH, ANIM_CONFUSED, ANIM_COUNT };
+// INTRO replays the boot animation.
+enum Anim : uint8_t {
+  ANIM_NONE = 0, ANIM_BLINK, ANIM_LAUGH, ANIM_CONFUSED,
+  ANIM_WINK, ANIM_LOOK_AROUND, ANIM_NOD, ANIM_DIZZY, ANIM_SURPRISE, ANIM_INTRO, ANIM_COUNT
+};
 // Robot state as reported to observe(). Must match enum State in sketch.ino.
 enum RobotState : uint8_t { ROBOT_IDLE = 0, ROBOT_ARMED = 1, ROBOT_BALANCING = 2, ROBOT_FAULT = 3 };
 
-// Starts the face thread (the TFT is initialised there, so setup() is not delayed).
+// Starts the face thread (the TFT is initialised there and the boot intro plays, so setup() is not
+// delayed).
 // Returns false if no thread could be created; then call service() from loop() instead.
 bool begin();
 void service();

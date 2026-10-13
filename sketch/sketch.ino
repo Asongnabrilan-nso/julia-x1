@@ -530,10 +530,12 @@ void balanceCmd(float fwd, float steer) {
   cmdStampMs = millis();
 }
 
-// "face_mood": 0 = automatic (follows the robot's state), 1..4 = neutral/happy/tired/angry.
+// "face_mood": 0 = automatic (follows the robot's state), 1..9 = neutral/happy/tired/angry/sad/
+// surprised/suspicious/love/showcase.
 void faceMood(int mood) { face::setMood((uint8_t)mood); }
 
-// "face_anim": one-shot animation, 1 = blink, 2 = laugh, 3 = confused.
+// "face_anim": one-shot animation, 1..9 = blink/laugh/confused/wink/look around/nod/dizzy/surprise/
+// boot intro.
 void faceAnim(int anim) { face::play((uint8_t)anim); }
 
 // "set_param": name must match PARAM_TABLE. Returns false for unknown names / out-of-range values.

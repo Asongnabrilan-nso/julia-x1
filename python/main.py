@@ -90,8 +90,10 @@ PARAMS = [
 PARAM_META = {p[0]: p for p in PARAMS}
 
 # TFT face (sketch/face.cpp). List index = code sent to the MCU; must match face::Mood / face::Anim.
-FACE_MOODS = ["auto", "neutral", "happy", "tired", "angry"]
-FACE_ANIMS = {"blink": 1, "laugh": 2, "confused": 3}
+FACE_MOODS = ["auto", "neutral", "happy", "tired", "angry",
+              "sad", "surprised", "suspicious", "love", "showcase"]
+FACE_ANIMS = {"blink": 1, "laugh": 2, "confused": 3, "wink": 4, "look_around": 5,
+              "nod": 6, "dizzy": 7, "surprise": 8, "intro": 9}
 PARAM_DEFAULTS = {p[0]: p[4] for p in PARAMS}
 
 logger = Logger("julia-x2")

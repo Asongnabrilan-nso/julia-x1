@@ -120,8 +120,8 @@ README, section "If driving feels laggy".
 
 ## Step 6 — TFT face display (personality)
 
-Julia now has a face: animated robot eyes ([FluxGarage RoboEyes](https://github.com/FluxGarage/RoboEyes))
-on a [2.8" ILI9341 320×240 SPI TFT](https://done.land/components/humaninterface/display/tft/ili9341/2.8inch320x240/).
+Julia now has a face: spring-animated robot eyes (ported from
+[Grobot_Animations](https://github.com/tanmaywankar/Grobot_Animations), MIT) on a [2.8" ILI9341 320×240 SPI TFT](https://done.land/components/humaninterface/display/tft/ili9341/2.8inch320x240/).
 The eyes react to what the robot is doing, and the operator can set a mood or play an animation from
 the dashboard. **Only the display is used.** The module's SD card and touch controller stay unconnected.
 
@@ -179,67 +179,96 @@ CNC shield covers the UNO Q headers, so every signal is taken from a spare shiel
 
 ### What the face does
 
+On boot the display plays an intro: a line powers on, **JULIA-X2** is revealed between two rails,
+"self-balancing robot" types out under a boot bar, the screen closes like a pair of eyelids, and the
+eyes spring open and look around the room.
+
 | Robot situation                         | Eyes |
 |-----------------------------------------|------|
 | Idle, nobody driving                    | cyan, blinks, looks around on its own after 4 s |
-| Driving                                 | looks into the turn, ahead when going forward, down when reversing |
-| Someone/something in front (ToF sensor) | looks up; when the robot is standing still it laughs once to greet (at most every 8 s) |
+| Driving                                 | joystick left = eyes move right on the screen, and vice versa (`MIRROR_GAZE`); ahead when going forward, down when reversing |
+| Someone/something in front (ToF sensor) | looks up; when the robot is standing still it laughs or looks surprised to greet (at most every 8 s) |
 | Driving forward into an obstacle        | confused shake (avoidance is holding it back) |
 | Armed, waiting to be held upright       | amber, looks up |
 | Balancing                               | mint, happy eyes; laughs once when balancing engages |
-| Fault (fell over, runaway, IMU error)   | red-orange, tired, sweating, looks down |
+| Fault (fell over, runaway, IMU error)   | red-orange; dizzy (eyes circle) then tired, looks down |
 
-**Dashboard → Face** overrides the mood (Neutral / Happy / Tired / Angry, each with its own colour)
-until you select **Auto** again. **Play once** fires Blink, Laugh or Confused. The override is held by
+**Dashboard → Face** overrides the mood until you select **Auto** again. Each mood has its own colour:
+
+| Mood | Eyes |
+|------|------|
+| Neutral | cyan rings |
+| Happy | mint, lower half hidden (smiling) |
+| Tired | soft blue, heavy drooping lids |
+| Angry | red, lids slanted down towards the nose |
+| Sad | light blue, lids slanted down to the outside |
+| Surprised | yellow, wide open with tiny pupils |
+| Suspicious | purple, one eye narrowed to a slit, the other with a cocked lid |
+| Love | pink, beating hearts |
+| Showcase | cycles through all of the above every 3.5 s, each with its matching animation |
+
+**Play once** fires Blink, Laugh, Confused, Wink, Look around, Nod, Dizzy, Surprise or the Boot intro. The override is held by
 the Python app and re-sent if the MCU restarts.
 
 ### Implementation
 
 - `sketch/face.h`, `sketch/face.cpp`: the face runs in its own `face` thread at the same priority as
-  `loop()`, far below the 200 Hz balance thread. RoboEyes draws into a 1-bit 320×240 canvas in RAM.
-  Each frame is compared with what is already on the glass, and only the changed areas are sent.
-  - **Why it streams in chunks:** on the UNO Q, SPI2 is interrupt-driven, with no DMA and no FIFO in
-    this board's devicetree, so every byte costs a CPU interrupt. A full 16-bit frame (150 KB) sent in
-    one go would starve the balance loop. The changed pixels go out in 256-byte bursts with a 0.5 ms
-    sleep between bursts. A typical eye movement is about 6 KB per frame.
-  - **Why the face is a `.cpp`:** RoboEyes defines short global macros (`N`, `E`, `S`, `W`, `ON`, `DEFAULT`, …),
-    so it lives in its own `.cpp` to keep them out of `sketch.ino`.
+  `loop()`, far below the 200 Hz balance thread, capped at 50 fps.
+  - **Eyes:** Grobot's model: ring-shaped eyes whose top lid, bottom lid, lid tilt, pupil and size
+    each follow a damped spring towards the mood's target shape, as does the gaze. Blinks, mood changes
+    and glances therefore overshoot and settle instead of jumping. Grobot needs TFT_eSPI (ESP32 only),
+    so the shapes and physics are re-implemented in `face.cpp`; no extra library is needed.
+  - **Drawing:** each frame goes into a 1-bit 320×240 canvas in RAM and is compared with what is
+    already on the glass. Only the changed rectangles are sent.
+  - **Fast SPI:** the core's SPI driver runs SPI2 interrupt-driven, one IRQ per byte, which was the
+    reason for the low frame rate. Pixel data now bypasses the driver: the face thread writes
+    straight into SPI2's FIFO by polling. Polling raises no interrupts and runs at the lowest
+    priority, so the balance thread can preempt it at any time. The driver is still used to
+    initialise the display. If the fast path ever stalls, the face switches back to the driver
+    (256-byte bursts with 0.5 ms gaps) and logs it. `FAST_SPI = false` forces the driver.
   - **The D10 chip-select fix:** D10 doubles as SPI2's hardware NSS pin, and `SPI.begin()` re-claims it.
     A small SPI wrapper hands D10 back to GPIO so the Adafruit driver's chip-select works.
 - `sketch/sketch.ino`: `loop()` passes the robot state, drive command and ToF reading to the face.
-  New Bridge calls: `face_mood(int)` (0 = auto, 1–4 = neutral/happy/tired/angry) and
-  `face_anim(int)` (1 = blink, 2 = laugh, 3 = confused).
-- `sketch/sketch.yaml`: adds `Adafruit BusIO`, `Adafruit GFX Library`, `Adafruit ILI9341`,
-  `FluxGarage RoboEyes`.
+  New Bridge calls: `face_mood(int)` (0 = auto, 1–9 = neutral/happy/tired/angry/sad/surprised/
+  suspicious/love/showcase) and `face_anim(int)` (1–9 = blink/laugh/confused/wink/look around/nod/
+  dizzy/surprise/boot intro). The codes must match `FACE_MOODS` / `FACE_ANIMS` in `python/main.py`.
+- `sketch/sketch.yaml`: adds `Adafruit BusIO`, `Adafruit GFX Library`, `Adafruit ILI9341`.
 - `python/main.py`: `face_mood` / `face_anim` dashboard messages, forwarded to the MCU.
 - `assets/`: **Face** button in the header opens the face sheet.
 
 Settings at the top of `sketch/face.cpp`: `ROTATION` (1 or 3 if the face is upside down),
-`SPI_HZ` (24 MHz), `MIRROR_GAZE` (flip if the eyes look the wrong way when turning), eye size and
-colours, and the `CHUNK_BYTES` / `CHUNK_GAP_US` pair that limits how much CPU the display may take.
+`SPI_HZ` (24 MHz; 40 MHz is a little faster with short wires), `FAST_SPI`, `MIRROR_GAZE` (flip if the
+eyes look the wrong way when turning), `SCALE` (eye size), the mood shapes (`SHAPE_*`, same units as
+Grobot's `MoodData`), spring constants and colours.
 
 ### Bring-up
 
 1. Wire the display with the robot unpowered, then restart the app in App Lab.
 2. Within a few seconds of boot the eyes should open in the centre of the screen. In the serial
    monitor (`arduino-app-cli monitor`), look for:
-   `TFT face ready (ILI9341 on D10/D9/D7): power mode 0x94, self-diag 0xC0 ...`.
+   `TFT face ready (ILI9341 on D10/D9/D7, fast polled SPI): power mode 0x94, self-diag 0xC0 ...`.
    0x94 / 0xC0 are the usual values. **0x00 or 0xFF** means nothing answered on MISO: check D12, or
-   ignore it if you left MISO unconnected.
+   ignore it if you left MISO unconnected. Every 10 s the face logs its frame rate, for example
+   `TFT face: 45 fps, 1200 KB/s to the display (fast SPI)`. If it says `driver SPI`, or logs
+   `fast SPI stopped responding`, the fast path failed and the face fell back to the slow driver.
 3. **Check that the display does not disturb balancing:** arm balancing, open **Tune** and watch
    **Loop** (µs). The counters reset on every arm. Loop must stay well under 5000 µs, and the overrun
-   count must stay at 0 while the eyes move. If
-   overruns appear, raise `CHUNK_GAP_US` or lower `CHUNK_BYTES` in `face.cpp`.
+   count must stay at 0 while the eyes move. If overruns appear, set `FAST_SPI = false` and
+   report it: the fast path is meant to be invisible to the balance thread.
 
 | Symptom | Fix |
 |---------|-----|
 | White screen | Display not initialised: check CS (D10), DC (D9), RESET (D7), SCK (D13), MOSI (D11), and that VCC is 5 V |
 | Snow, wrong colours, shifted image | Lower `SPI_HZ` to 12 MHz (long jumper wires through the shield headers) |
 | Face upside down | `ROTATION = 3` |
+| Garbage only since the fast-SPI update, or the face freezes | `FAST_SPI = false` (back to the driver) and report what the log says |
 | Very dim | Backlight (LED) on 3.3 V? J1 open when VCC is 5 V? |
 
-**Verification status:** compiled with the App Lab library profile for the UNO Q (`face.cpp` and
-`sketch.ino` build without warnings; the remaining warnings come from inside the RoboEyes library).
+**Verification status:** compiled with the App Lab library profile for the UNO Q. The eye shapes
+were rendered and checked with a Python mirror of the drawing code, and the frame rate was estimated
+by simulating the springs and the partial-redraw logic: about 45 fps on average while animating at
+20 MHz SPI (worst frame about 28 fps), versus roughly 12 fps before. The fast-SPI register sequence
+is written from the STM32U5 reference manual but **has not run on hardware yet.**
 The partial-redraw logic was checked against 3000 random frames in a Python mirror of the C++ code.
 The Python handlers were tested against a fake Bridge, and the dashboard's Face sheet in headless
 Chromium. **Not yet run on the real display or robot.** In particular, the SPI throughput and the
